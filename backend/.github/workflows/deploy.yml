@@ -1,0 +1,82 @@
+name: CI/CD Pipeline with GAR
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      SERVICE_NAME: mend-node-server
+      IMAGE_NAME: mend-node-server
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Authenticate with Google Cloud
+        run: |
+          echo "${{ secrets.GCP_SA_KEY }}" | base64 --decode > accountservice.json
+          gcloud auth activate-service-account 223684000204-compute@developer.gserviceaccount.com --key-file=accountservice.json
+          gcloud auth configure-docker asia-south1-docker.pkg.dev
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: accountservice.json
+
+      - name: Set Environment Variables Based on Branch
+        run: |
+          PROJECT_ID=$(jq -r '.project_id' accountservice.json)
+          echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: docker build -t asia-south1-docker.pkg.dev/${{ env.PROJECT_ID }}/mend-node-server/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+
+      - name: Push Docker image to Artifact Registry
+        run: docker push asia-south1-docker.pkg.dev/${{ env.PROJECT_ID }}/mend-node-server/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          PAYMENT_SUCCESS_REDIRECT_URL: ${{ secrets.PAYMENT_SUCCESS_REDIRECT_URL }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          CLIENT_VERSION: ${{ secrets.CLIENT_VERSION }}
+          JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          REFRESH_TOKEN_EXPIRES_IN: ${{ secrets.REFRESH_TOKEN_EXPIRES_IN }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=asia-south1-docker.pkg.dev/${{ env.PROJECT_ID }}/mend-node-server/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --platform=managed \
+            --region=asia-south1 \
+            --allow-unauthenticated \
+            --cpu=1 \
+            --memory=512Mi \
+            --max-instances=1 \
+            --min-instances=0 \
+            --set-env-vars="NODE_ENV=production,\
+              RUN_URL=https://${{ env.SERVICE_NAME }}-${{ env.PROJECT_ID }}.uc.a.run.app,\
+              CLIENT_VERSION=${CLIENT_VERSION},\
+              MONGO_URI=${MONGO_URI},\
+              PAYMENT_SUCCESS_REDIRECT_URL=${PAYMENT_SUCCESS_REDIRECT_URL},\
+              CLIENT_ID=${CLIENT_ID},\
+              JWT_SECRET=${JWT_SECRET},\
+              JWT_EXPIRES_IN=${JWT_EXPIRES_IN},\
+              CLIENT_SECRET=${CLIENT_SECRET},\
+              REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET},\
+              REFRESH_TOKEN_EXPIRES_IN=${REFRESH_TOKEN_EXPIRES_IN},\
+              SMTP_USER=${SMTP_USER}, \
+              SMTP_PASS=${SMTP_PASS}, \
+              FROM_EMAIL=${FROM_EMAIL}, \
+              GCP_PROJECT_ID=${GCP_PROJECT_ID}, \
+              GCP_SA_KEY=${GCP_SA_KEY}, \
+              GCP_BUCKET_NAME=${GCP_BUCKET_NAME}" \
+            --timeout=500 \
+            --project=${{ env.PROJECT_ID }}

@@ -1,0 +1,12 @@
+node_modules
+.env.production
+.env
+dist
+.kiro
+serviceAccountKey.json
+
+.vscode
+
+restaurant-dashboard
+
+backend/node_modules

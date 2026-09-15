@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mend — Data Seeder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+  :root {
+    --green: #00C48C;
+    --green-dim: #009E72;
+    --red: #FF4D4F;
+    --amber: #F59E0B;
+    --bg: #0D0D0D;
+    --surface: #161616;
+    --border: #242424;
+    --text: #E8E8E8;
+    --muted: #666;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Log terminal */
+  #log-panel {
+    background: #0A0A0A;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 320px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .log-ok    { color: var(--green); }
+  .log-err   { color: var(--red); }
+  .log-warn  { color: var(--amber); }
+  .log-info  { color: #6B8CFF; }
+  .log-dim   { color: var(--muted); }
+  .log-head  { color: #C084FC; font-weight: 600; }
+
+  /* Pills */
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+  .pill-green  { background: rgba(0,196,140,.12); color: var(--green); border: 1px solid rgba(0,196,140,.25); }
+  .pill-red    { background: rgba(255,77,79,.12);  color: var(--red);   border: 1px solid rgba(255,77,79,.25); }
+  .pill-amber  { background: rgba(245,158,11,.12); color: var(--amber); border: 1px solid rgba(245,158,11,.25); }
+  .pill-blue   { background: rgba(107,140,255,.12);color: #6B8CFF;      border: 1px solid rgba(107,140,255,.25); }
+  .pill-purple { background: rgba(192,132,252,.12);color: #C084FC;      border: 1px solid rgba(192,132,252,.25); }
+
+  /* Card */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+
+  /* Input */
+  input, textarea, select {
+    background: #111;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    padding: 8px 12px;
+    width: 100%;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--green); }
+  input[type=number] { font-family: 'JetBrains Mono', monospace; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+
+  /* Btn */
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 9px 18px; border-radius: 7px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    border: none; transition: all .15s; white-space: nowrap;
+  }
+  .btn-primary { background: var(--green); color: #000; }
+  .btn-primary:hover { background: var(--green-dim); }
+  .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-ghost:hover { border-color: #444; background: #1A1A1A; }
+  .btn-danger { background: rgba(255,77,79,.15); border: 1px solid rgba(255,77,79,.3); color: var(--red); }
+  .btn-danger:hover { background: rgba(255,77,79,.25); }
+
+  /* Tab */
+  .tab-item {
+    padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500;
+    cursor: pointer; color: var(--muted); transition: all .15s; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .tab-item.active { background: #1E1E1E; color: var(--text); border-color: var(--border); }
+  .tab-item:hover:not(.active) { color: #999; }
+
+  /* Progress */
+  .progress-bar { height: 4px; background: #1E1E1E; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width .3s ease; }
+
+  /* Spinner */
+  .spin { animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Template textarea */
+  .template-box {
+    background: #0A0A0A;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #A3E6C8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 10px 12px;
+    width: 100%;
+    height: 160px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.6;
+  }
+  .template-box:focus { border-color: var(--green); }
+
+  /* Status counts */
+  .stat-box { background: #111; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+  .stat-val { font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ─────────────────── HEADER ─────────────────── -->
+<div style="border-bottom:1px solid var(--border); padding:14px 24px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--bg); z-index:50;">
+  <div style="display:flex; align-items:center; gap:12px;">
+    <div style="width:32px;height:32px;background:var(--green);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div>
+      <div style="font-weight:700;font-size:15px;letter-spacing:-.02em;">Mend Seeder</div>
+      <div style="font-size:11px;color:var(--muted);">Controlled dummy data generator for all modules</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span class="pill pill-blue" id="conn-status">⬤ Not connected</span>
+    <button class="btn btn-ghost" onclick="clearLog()" style="font-size:12px;padding:6px 12px;">Clear log</button>
+  </div>
+</div>
+
+<!-- ─────────────────── BODY ─────────────────── -->
+<div style="display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 57px);">
+
+  <!-- LEFT NAV -->
+  <div style="border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:57px;height:calc(100vh - 57px);overflow-y:auto;">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:6px 8px 4px;">Setup</div>
+    <div class="tab-item active" onclick="showTab('config')" id="tab-config">⚙ Connection</div>
+    <div class="tab-item" onclick="showTab('overview')" id="tab-overview">◈ Overview</div>
+
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:14px 8px 4px;">Seed Modules</div>
+    <div class="tab-item" onclick="showTab('hotel')" id="tab-hotel">🏨 Hotel</div>
+    <div class="tab-item" onclick="showTab('users')" id="tab-users">👤 Users</div>
+    <div class="tab-item" onclick="showTab('shifts')" id="tab-shifts">📅 Shifts</div>
+    <div class="tab-item" onclick="showTab('attendance')" id="tab-attendance">🕐 Attendance</div>
+    <div class="tab-item" onclick="showTab('tasks')" id="tab-tasks">✅ Tasks</div>
+    <div class="tab-item" onclick="showTab('wellbeing')" id="tab-wellbeing">💚 Wellbeing</div>
+    <div class="tab-item" onclick="showTab('sos')" id="tab-sos">🆘 SOS</div>
+    <div class="tab-item" onclick="showTab('lms')" id="tab-lms">📚 LMS</div>
+    <div class="tab-item" onclick="showTab('passport')" id="tab-passport">🪪 Passport</div>
+    <div class="tab-item" onclick="showTab('recruitment')" id="tab-recruitment">💼 Recruitment</div>
+    <div class="tab-item" onclick="showTab('compliance')" id="tab-compliance">🛡 Compliance</div>
+
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:14px 8px 4px;">Full Seed</div>
+    <div class="tab-item" onclick="showTab('fullseed')" id="tab-fullseed">🚀 Run All</div>
+  </div>
+
+  <!-- MAIN AREA -->
+  <div style="padding:24px 28px;display:flex;flex-direction:column;gap:20px;max-width:1000px;">
+
+    <!-- ═══════════════ CONFIG ═══════════════ -->
+    <div id="pane-config">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Connection Setup</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Set your backend URL and admin credentials. All seeding operations use these.</div>
+
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div>
+          <label>Backend Base URL</label>
+          <input type="text" id="base-url" placeholder="http://localhost:3000" value="http://localhost:3000" />
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">Do not include /api/v1 — it's appended automatically</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div>
+            <label>Mend Admin Email</label>
+            <input type="email" id="admin-email" placeholder="admin@mend.com" value="admin@mend.com" />
+          </div>
+          <div>
+            <label>Mend Admin Password</label>
+            <input type="password" id="admin-pass" placeholder="••••••••" value="Admin@1234" />
+          </div>
+        </div>
+        <div>
+          <label>Hotel Login Email (after seeding hotel)</label>
+          <input type="email" id="hotel-email-cfg" placeholder="set after seeding hotel" />
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn btn-primary" onclick="testConnection()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Test Connection
+          </button>
+          <button class="btn btn-ghost" onclick="loginAdmin()">Login as Admin</button>
+          <span class="pill pill-blue mono" id="token-status">No token</span>
+        </div>
+      </div>
+
+      <!-- Seeded state summary -->
+      <div class="card" style="padding:20px;margin-top:16px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Seeded IDs (auto-tracked)</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;" id="seeded-ids-grid">
+          <div class="stat-box"><div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Hotel Token</div><div class="mono" style="font-size:11px;color:var(--green);" id="disp-hotel-token">—</div></div>
+          <div class="stat-box"><div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Hotel ID</div><div class="mono" style="font-size:11px;color:var(--green);" id="disp-hotel-id">—</div></div>
+          <div class="stat-box"><div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Users seeded</div><div class="mono stat-val" id="disp-user-count">0</div></div>
+          <div class="stat-box"><div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Shifts seeded</div><div class="mono stat-val" id="disp-shift-count">0</div></div>
+          <div class="stat-box"><div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Tasks seeded</div><div class="mono stat-val" id="disp-task-count">0</div></div>
+          <div class="stat-box"><div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Jobs seeded</div><div class="mono stat-val" id="disp-job-count">0</div></div>
+        </div>
+        <button class="btn btn-danger" style="margin-top:14px;font-size:12px;padding:6px 14px;" onclick="clearState()">Reset tracked state</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ OVERVIEW ═══════════════ -->
+    <div id="pane-overview" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seeding Overview</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">The full dependency chain — seed in this order to ensure data integrity.</div>
+      <div class="card" style="padding:20px;">
+        <div style="display:flex;flex-direction:column;gap:0;">
+          <div id="chain-items"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ HOTEL ═══════════════ -->
+    <div id="pane-hotel" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Hotel</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Creates a hotel tenant via Admin credentials. Sets hotel token for all subsequent calls.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Hotel Name <span style="color:var(--amber);">★ change per seed</span></label>
+            <input id="h-name" value="The Grand Mend Hotel" /></div>
+          <div><label>Contact Person</label>
+            <input id="h-contact" value="Rajesh Sharma" /></div>
+          <div><label>Email <span style="color:var(--amber);">★</span></label>
+            <input id="h-email" value="manager@grandmend.in" /></div>
+          <div><label>Phone <span style="color:var(--amber);">★</span></label>
+            <input id="h-phone" value="9876543210" /></div>
+          <div><label>City</label>
+            <input id="h-city" value="Mumbai" /></div>
+          <div><label>State</label>
+            <input id="h-state" value="Maharashtra" /></div>
+          <div><label>Country</label>
+            <input id="h-country" value="India" /></div>
+          <div><label>Pincode</label>
+            <input type="number" id="h-pincode" value="400001" /></div>
+          <div><label>Staff Strength</label>
+            <input type="number" id="h-staff" value="50" /></div>
+          <div><label>Property Type</label>
+            <select id="h-proptype">
+              <option value="Luxury Hotel">Luxury Hotel</option>
+              <option value="Boutique Hotel">Boutique Hotel</option>
+              <option value="Resort">Resort</option>
+              <option value="Banquet / Event Venue">Banquet / Event Venue</option>
+              <option value="Restaurant / F&B">Restaurant / F&B</option>
+            </select></div>
+          <div><label>Monthly Events</label>
+            <select id="h-events">
+              <option value="1–5 events/month">1–5 events/month</option>
+              <option value="5–15 events/month" selected>5–15 events/month</option>
+              <option value="15–30 events/month">15–30 events/month</option>
+              <option value="Daily operations">Daily operations</option>
+            </select></div>
+          <div><label>Primary Pain Point</label>
+            <select id="h-pain">
+              <option value="Staff Attrition" selected>Staff Attrition</option>
+              <option value="Service Quality">Service Quality</option>
+              <option value="Operational Efficiency">Operational Efficiency</option>
+              <option value="Hiring Delays">Hiring Delays</option>
+            </select></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn btn-primary" onclick="seedHotel()">Seed Hotel</button>
+          <div style="font-size:12px;color:var(--muted);">Default password: <span class="mono" style="color:var(--green);">hotel1234</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ USERS ═══════════════ -->
+    <div id="pane-users" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Users</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Creates N users via hotel token. Each gets a template prefix so you can identify them.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+          <div><label>Count</label><input type="number" id="u-count" value="5" min="1" max="50"/></div>
+          <div><label>Email prefix <span style="color:var(--amber);">★</span></label><input id="u-prefix" value="testuser" /></div>
+          <div><label>Email domain</label><input id="u-domain" value="grandmend.in" /></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Role</label>
+            <select id="u-role">
+              <option value="EMPLOYEE" selected>EMPLOYEE</option>
+              <option value="MANAGER">MANAGER</option>
+              <option value="ADMIN">ADMIN</option>
+            </select></div>
+          <div><label>Department Type</label>
+            <select id="u-dept">
+              <option value="FOOD_AND_BEVERAGE" selected>Food & Beverage</option>
+              <option value="FRONT_OFFICE">Front Office</option>
+              <option value="HOUSEKEEPING">Housekeeping</option>
+              <option value="KITCHEN">Kitchen</option>
+              <option value="SECURITY">Security</option>
+              <option value="HUMAN_RESOURCES">Human Resources</option>
+            </select></div>
+          <div><label>Department Role</label>
+            <select id="u-deptrole">
+              <option value="WAITER" selected>Waiter</option>
+              <option value="CAPTAIN">Captain</option>
+              <option value="FNB_MANAGER">F&B Manager</option>
+              <option value="RECEPTIONIST">Receptionist</option>
+              <option value="FRONT_OFFICE_MANAGER">Front Office Manager</option>
+              <option value="ROOM_ATTENDANT">Room Attendant</option>
+              <option value="CHEF_DE_PARTIE">Chef de Partie</option>
+            </select></div>
+          <div><label>Profession</label>
+            <select id="u-prof">
+              <option value="Waiter" selected>Waiter</option>
+              <option value="Chef">Chef</option>
+              <option value="Captain">Captain</option>
+              <option value="Management">Management</option>
+            </select></div>
+        </div>
+        <div>
+          <label>Template — first name pattern (use {N} for number)</label>
+          <input id="u-firstname-tpl" value="Seed_{N}_Employee" />
+        </div>
+        <button class="btn btn-primary" onclick="seedUsers()" style="width:fit-content;">Seed Users</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SHIFTS ═══════════════ -->
+    <div id="pane-shifts" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Shifts</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Creates shifts and assigns seeded users. Uses hotel manager token.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Shift Name / Label</label><input id="sh-name" value="Morning Shift — Seed" /></div>
+          <div><label>Number of shifts to create</label><input type="number" id="sh-count" value="3" min="1" max="10" /></div>
+          <div><label>Start Time (first shift)</label><input type="datetime-local" id="sh-start" /></div>
+          <div><label>Duration (hours per shift)</label><input type="number" id="sh-dur" value="9" min="1" max="10" /></div>
+          <div><label>Gap between shifts (hours)</label><input type="number" id="sh-gap" value="15" min="14" /></div>
+        </div>
+        <div>
+          <label>Assign seeded users (comma-separated indices, or "all")</label>
+          <input id="sh-userindices" value="all" placeholder="all / 0,1,2" />
+        </div>
+        <button class="btn btn-primary" onclick="seedShifts()" style="width:fit-content;">Seed Shifts</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ ATTENDANCE ═══════════════ -->
+    <div id="pane-attendance" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Attendance</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Clocks seeded users in/out. Coordinates must be inside hotel geofence. You control whether violations are created.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Latitude (inside geofence)</label><input type="number" id="att-lat" value="19.0760" step="0.0001" /></div>
+          <div><label>Longitude</label><input type="number" id="att-lng" value="72.8777" step="0.0001" /></div>
+          <div><label>Work duration (minutes)</label><input type="number" id="att-dur" value="480" /></div>
+          <div><label>Create HES violation? (>600 min)</label>
+            <select id="att-violation">
+              <option value="no" selected>No — compliant shift</option>
+              <option value="yes">Yes — 11+ hours (violation)</option>
+            </select></div>
+        </div>
+        <div>
+          <label>Which users (indices or "all")</label>
+          <input id="att-userindices" value="all" />
+        </div>
+        <div style="background:#111;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--muted);">
+          ℹ️ Clock-in then clock-out is called sequentially per user. Hotel coords are passed so geofence passes.
+        </div>
+        <button class="btn btn-primary" onclick="seedAttendance()" style="width:fit-content;">Seed Attendance</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ TASKS ═══════════════ -->
+    <div id="pane-tasks" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Tasks</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Assigns tasks to seeded users and marks them completed. Drives OPH / efficiency scores.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Tasks per user</label><input type="number" id="t-peruser" value="3" min="1" max="20" /></div>
+          <div><label>Task type</label>
+            <select id="t-type">
+              <option value="HOUSEKEEPING">Housekeeping</option>
+              <option value="ROOM_SERVICE" selected>Room Service</option>
+              <option value="MAINTENANCE">Maintenance</option>
+              <option value="FRONT_DESK">Front Desk</option>
+              <option value="FOOD_AND_BEVERAGE">Food & Beverage</option>
+            </select></div>
+          <div><label>Priority</label>
+            <select id="t-priority">
+              <option value="LOW">Low</option>
+              <option value="MEDIUM" selected>Medium</option>
+              <option value="HIGH">High</option>
+              <option value="URGENT">Urgent</option>
+            </select></div>
+          <div><label>Weight (1–10)</label><input type="number" id="t-weight" value="6" min="1" max="10" /></div>
+          <div><label>Duration per task (minutes)</label><input type="number" id="t-dur" value="45" min="5" /></div>
+          <div><label>Mark as COMPLETED?</label>
+            <select id="t-complete">
+              <option value="yes" selected>Yes — drives OPH scores</option>
+              <option value="no">No — leave PENDING</option>
+            </select></div>
+        </div>
+        <div>
+          <label>Task title template (use {N})</label>
+          <input id="t-title-tpl" value="[SEED] Room Service Task #{N}" />
+        </div>
+        <button class="btn btn-primary" onclick="seedTasks()" style="width:fit-content;">Seed Tasks</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ WELLBEING ═══════════════ -->
+    <div id="pane-wellbeing" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Wellbeing</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Submits daily wellbeing for seeded users. Controls fatigue risk tier for testing alerts.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Rating (1 = worst, 5 = best)</label><input type="number" id="wb-rating" value="3" min="1" max="5" /></div>
+          <div><label>Sleep hours</label><input type="number" id="wb-sleep" value="6.5" step="0.5" /></div>
+          <div><label>Stress level (1–10)</label><input type="number" id="wb-stress" value="5" min="1" max="10" /></div>
+          <div><label>Scenario</label>
+            <select id="wb-scenario" onchange="applyWbScenario(this.value)">
+              <option value="normal">Normal — low fatigue</option>
+              <option value="moderate">Moderate stress</option>
+              <option value="high">High fatigue (trigger alert)</option>
+              <option value="critical">Critical — max stress</option>
+            </select></div>
+        </div>
+        <div>
+          <label>Which users (indices or "all")</label>
+          <input id="wb-userindices" value="all" />
+        </div>
+        <div style="background:#111;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--muted);">
+          ℹ️ Wellbeing uses the hotel token (hotel posts on behalf of user). One entry per user per day enforced.
+        </div>
+        <button class="btn btn-primary" onclick="seedWellbeing()" style="width:fit-content;">Seed Wellbeing</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SOS ═══════════════ -->
+    <div id="pane-sos" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed SOS Alerts</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Triggers SOS events for selected users. Tests notification chain.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Trigger for user (index)</label><input type="number" id="sos-userindex" value="0" min="0" /></div>
+          <div><label>Message</label><input id="sos-msg" value="[SEED] Test SOS alert — please ignore" /></div>
+          <div><label>Latitude</label><input type="number" id="sos-lat" value="19.0760" step="0.0001" /></div>
+          <div><label>Longitude</label><input type="number" id="sos-lng" value="72.8777" step="0.0001" /></div>
+          <div><label>Auto-resolve after seeding?</label>
+            <select id="sos-resolve">
+              <option value="yes" selected>Yes</option>
+              <option value="no">No — leave open</option>
+            </select></div>
+        </div>
+        <button class="btn btn-primary" onclick="seedSOS()" style="width:fit-content;">Trigger SOS</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ LMS ═══════════════ -->
+    <div id="pane-lms" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed LMS</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Creates a course → lecture → assessment → enrolls users → marks lectures complete → submits assessment attempt (pass). Generates certificates that feed the Passport.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Course title <span style="color:var(--amber);">★</span></label><input id="lms-title" value="[SEED] Food Safety & HES Compliance" /></div>
+          <div><label>Category</label>
+            <select id="lms-cat">
+              <option value="Food & Beverage" selected>Food & Beverage</option>
+              <option value="Compliance">Compliance</option>
+              <option value="Housekeeping">Housekeeping</option>
+              <option value="Safety">Safety</option>
+              <option value="Leadership">Leadership</option>
+            </select></div>
+          <div><label>Lecture title</label><input id="lms-lec" value="[SEED] Introduction to HES Standards" /></div>
+          <div><label>Lecture video URL</label><input id="lms-video" value="https://www.youtube.com/watch?v=dQw4w9WgXcQ" /></div>
+          <div><label>Enroll which users (indices or "all")</label><input id="lms-userindices" value="all" /></div>
+          <div><label>Submit passing assessment?</label>
+            <select id="lms-pass">
+              <option value="yes" selected>Yes — generates certificate</option>
+              <option value="no">No — just enroll</option>
+            </select></div>
+        </div>
+        <button class="btn btn-primary" onclick="seedLMS()" style="width:fit-content;">Seed LMS</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ PASSPORT ═══════════════ -->
+    <div id="pane-passport" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Mend Passports</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Creates a Mend Passport for each seeded user, then syncs live LMS + efficiency data into it.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Which users (indices or "all")</label><input id="pp-userindices" value="all" /></div>
+          <div><label>Seed skills</label><input id="pp-skills" value="Food Safety, Customer Service, HES Compliance, Teamwork" /></div>
+          <div><label>Career entry title</label><input id="pp-career-title" value="[SEED] Room Service Executive" /></div>
+          <div><label>Career hotel</label><input id="pp-career-hotel" value="Grand Mend Hotel" /></div>
+          <div><label>From date</label><input type="date" id="pp-career-from" value="2024-01-01" /></div>
+          <div><label>Sync after create?</label>
+            <select id="pp-sync">
+              <option value="yes" selected>Yes — pull LMS certs + efficiency</option>
+              <option value="no">No</option>
+            </select></div>
+        </div>
+        <button class="btn btn-primary" onclick="seedPassports()" style="width:fit-content;">Seed Passports</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ RECRUITMENT ═══════════════ -->
+    <div id="pane-recruitment" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Seed Recruitment</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Creates job postings, publishes them, then applies with seeded users and progresses applications.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Job Posting</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Job title <span style="color:var(--amber);">★</span></label><input id="rc-title" value="[SEED] Head Waiter" /></div>
+          <div><label>Department</label>
+            <select id="rc-dept">
+              <option value="Food & Beverage" selected>Food & Beverage</option>
+              <option value="Front Office">Front Office</option>
+              <option value="Housekeeping">Housekeeping</option>
+              <option value="Management">Management</option>
+            </select></div>
+          <div><label>Employment Type</label>
+            <select id="rc-emptype">
+              <option value="Full Time" selected>Full Time</option>
+              <option value="Part Time">Part Time</option>
+              <option value="Contract">Contract</option>
+              <option value="Internship">Internship</option>
+            </select></div>
+          <div><label>Vacancies</label><input type="number" id="rc-vacancies" value="2" /></div>
+          <div><label>Shift policy</label><input id="rc-shift" value="Max 10 hours/day, 5 days/week, 14h recovery" /></div>
+          <div><label>Recovery policy</label><input id="rc-recovery" value="Minimum 14 hours between shifts" /></div>
+          <div><label>Salary min (INR)</label><input type="number" id="rc-salmin" value="25000" /></div>
+          <div><label>Salary max (INR)</label><input type="number" id="rc-salmax" value="40000" /></div>
+          <div><label>Certification required</label>
+            <select id="rc-cert">
+              <option value="None" selected>None</option>
+              <option value="Mend Certified">Mend Certified</option>
+              <option value="Mend Gold Seal">Mend Gold Seal</option>
+            </select></div>
+          <div><label>Number of jobs to create</label><input type="number" id="rc-count" value="2" min="1" max="10" /></div>
+        </div>
+        <div><label>Required skills (comma separated)</label><input id="rc-skills" value="Food Safety, Hospitality, HES Compliance" /></div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:4px;">Applications</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Apply with users (indices or "all")</label><input id="rc-applicants" value="all" /></div>
+          <div><label>Progress applications to</label>
+            <select id="rc-progress">
+              <option value="APPLIED">Applied only</option>
+              <option value="UNDER_REVIEW">Under Review</option>
+              <option value="SHORTLISTED" selected>Shortlisted</option>
+              <option value="HIRED">Hired</option>
+            </select></div>
+        </div>
+        <button class="btn btn-primary" onclick="seedRecruitment()" style="width:fit-content;">Seed Recruitment</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ COMPLIANCE ═══════════════ -->
+    <div id="pane-compliance" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">Evaluate Compliance</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Triggers the compliance engine for the seeded hotel. Computes score, assigns certification tier, writes audit log.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Window (days)</label><input type="number" id="comp-window" value="30" min="1" max="90" /></div>
+          <div><label>Expected tier (for verification)</label>
+            <select id="comp-expected">
+              <option value="None">None (non-compliant test)</option>
+              <option value="Mend Certified" selected>Mend Certified</option>
+              <option value="Mend Gold Seal">Mend Gold Seal</option>
+            </select></div>
+        </div>
+        <div style="background:#111;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--muted);">
+          ℹ️ Requires admin token. After evaluation the result is displayed below and compared against expected tier.
+        </div>
+        <button class="btn btn-primary" onclick="seedCompliance()" style="width:fit-content;">Run Compliance Evaluation</button>
+        <div id="comp-result" style="display:none;background:#0A0A0A;border:1px solid var(--border);border-radius:8px;padding:16px;font-family:'JetBrains Mono',monospace;font-size:12px;white-space:pre-wrap;color:var(--green);"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ FULL SEED ═══════════════ -->
+    <div id="pane-fullseed" style="display:none;">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px;">🚀 Run All — Full Scenario Seed</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Seeds the entire Mend platform in the correct dependency order. One button, full scenario.</div>
+      <div class="card" style="padding:20px;display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div><label>Hotel email suffix <span style="color:var(--amber);">★ make unique</span></label><input id="full-suffix" value="001" /></div>
+          <div><label>Number of employees</label><input type="number" id="full-users" value="5" min="2" max="20" /></div>
+          <div><label>Scenario type</label>
+            <select id="full-scenario">
+              <option value="compliant">Compliant hotel (Gold Seal target)</option>
+              <option value="moderate" selected>Moderate compliance (Certified target)</option>
+              <option value="noncompliant">Non-compliant (violations — test block)</option>
+            </select></div>
+          <div><label>Seed LMS + Passports?</label>
+            <select id="full-lms">
+              <option value="yes" selected>Yes</option>
+              <option value="no">No</option>
+            </select></div>
+        </div>
+        <div id="full-progress-wrap" style="display:none;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;" id="full-progress-label">Preparing...</div>
+          <div class="progress-bar"><div class="progress-fill" id="full-progress-bar" style="width:0%"></div></div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-primary" id="btn-fullseed" onclick="runFullSeed()" style="font-size:15px;padding:12px 28px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5,3 19,12 5,21" fill="currentColor"/></svg>
+            Seed Full Scenario
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── LOG PANEL (always visible) ─── -->
+    <div class="card" style="padding:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Execution Log</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="log-spinner" style="display:none;"><svg class="spin" width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="#444" stroke-width="2.5" fill="none"/><path d="M12 2a10 10 0 0 1 10 10" stroke="var(--green)" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg></span>
+          <span id="log-summary" style="font-size:11px;color:var(--muted);">Ready</span>
+        </div>
+      </div>
+      <div id="log-panel"></div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /grid -->
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+const S = {
+  adminToken: null,
+  hotelToken: null,
+  hotelId: null,        // hotel's `id` string (hotel_XXXXXX)
+  hotelMongoId: null,   // hotel's _id (MongoDB ObjectId string)
+  users: [],            // array of { id, mongoId, email, firstName }
+  shifts: [],           // array of shift docs
+  tasks: [],            // array of task docs
+  jobs: [],             // array of job docs
+  applications: [],     // array of application docs
+  lmsCourseId: null,
+  lmsAssessmentId: null,
+};
+
+function saveState() { try { localStorage.setItem('mend_seeder', JSON.stringify(S)); } catch(e){} }
+function loadState() {
+  try {
+    const d = localStorage.getItem('mend_seeder');
+    if (d) { Object.assign(S, JSON.parse(d)); updateDisplays(); }
+  } catch(e){}
+}
+
+function clearState() {
+  Object.assign(S, { adminToken:null, hotelToken:null, hotelId:null, hotelMongoId:null, users:[], shifts:[], tasks:[], jobs:[], applications:[], lmsCourseId:null, lmsAssessmentId:null });
+  saveState(); updateDisplays();
+  log('State cleared.', 'warn');
+}
+
+function updateDisplays() {
+  el('disp-hotel-token').textContent = S.hotelToken ? S.hotelToken.slice(0,22)+'…' : '—';
+  el('disp-hotel-id').textContent = S.hotelId || '—';
+  el('disp-user-count').textContent = S.users.length;
+  el('disp-shift-count').textContent = S.shifts.length;
+  el('disp-task-count').textContent = S.tasks.length;
+  el('disp-job-count').textContent = S.jobs.length;
+  el('token-status').textContent = S.adminToken ? '✓ Admin token active' : 'No token';
+  el('token-status').className = S.adminToken ? 'pill pill-green mono' : 'pill pill-blue mono';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────────────────────────────────────
+const el = id => document.getElementById(id);
+const val = id => el(id)?.value?.trim();
+const numVal = id => parseInt(el(id)?.value || '0', 10);
+const BASE = () => val('base-url').replace(/\/$/, '') + '/api/v1';
+
+let logCount = 0;
+function log(msg, type='info') {
+  const panel = el('log-panel');
+  const now = new Date().toTimeString().slice(0,8);
+  const cls = type === 'ok' ? 'log-ok' : type === 'err' ? 'log-err' : type === 'warn' ? 'log-warn' : type === 'head' ? 'log-head' : type === 'dim' ? 'log-dim' : 'log-info';
+  const prefix = type === 'ok' ? '✓' : type === 'err' ? '✗' : type === 'head' ? '▶' : type === 'warn' ? '⚠' : '·';
+  panel.innerHTML += `<div class="${cls}">[${now}] ${prefix} ${msg}</div>`;
+  panel.scrollTop = panel.scrollHeight;
+  logCount++;
+  el('log-summary').textContent = `${logCount} entries`;
+}
+
+function clearLog() { el('log-panel').innerHTML = ''; logCount = 0; el('log-summary').textContent = 'Ready'; }
+
+function setBusy(busy) {
+  el('log-spinner').style.display = busy ? '' : 'none';
+}
+
+async function api(method, path, body, token) {
+  const url = BASE() + path;
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.message || `HTTP ${res.status}`);
+  }
+  return json;
+}
+
+function resolveIndices(str, arr) {
+  const s = str.trim().toLowerCase();
+  if (s === 'all') return arr.map((_, i) => i);
+  return s.split(',').map(x => parseInt(x.trim(),10)).filter(n => !isNaN(n) && n >= 0 && n < arr.length);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB NAVIGATION
+// ─────────────────────────────────────────────────────────────────────────────
+const PANES = ['config','overview','hotel','users','shifts','attendance','tasks','wellbeing','sos','lms','passport','recruitment','compliance','fullseed'];
+
+function showTab(name) {
+  PANES.forEach(p => {
+    el('pane-'+p).style.display = p === name ? '' : 'none';
+    const t = el('tab-'+p);
+    if (t) { t.className = 'tab-item' + (p === name ? ' active' : ''); }
+  });
+  if (name === 'overview') renderOverview();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONNECTION
+// ─────────────────────────────────────────────────────────────────────────────
+async function testConnection() {
+  setBusy(true);
+  log('Testing connection to ' + BASE(), 'head');
+  try {
+    const r = await fetch(BASE() + '/health');
+    if (r.ok) {
+      log('Backend reachable — health check passed.', 'ok');
+      el('conn-status').textContent = '⬤ Connected';
+      el('conn-status').className = 'pill pill-green';
+    } else {
+      log(`Health returned HTTP ${r.status}`, 'err');
+    }
+  } catch(e) {
+    log('Cannot reach backend: ' + e.message + ' — check URL and CORS.', 'err');
+    el('conn-status').textContent = '⬤ Unreachable';
+    el('conn-status').className = 'pill pill-red';
+  }
+  setBusy(false);
+}
+
+async function loginAdmin() {
+  setBusy(true);
+  log('Logging in as Mend Admin…', 'head');
+  try {
+    const r = await api('POST', '/admin/login', { email: val('admin-email'), password: val('admin-pass') });
+    S.adminToken = r.data?.accessToken || r.data?.token;
+    if (!S.adminToken) throw new Error('No access token in response: ' + JSON.stringify(r));
+    log('Admin login successful. Token acquired.', 'ok');
+    saveState(); updateDisplays();
+  } catch(e) { log('Admin login failed: ' + e.message, 'err'); }
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HOTEL
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedHotel() {
+  if (!S.adminToken) { log('Login as admin first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Hotel ═══', 'head');
+  try {
+    const payload = {
+      name: val('h-name'),
+      contactPersonName: val('h-contact'),
+      email: val('h-email'),
+      phoneNumber: val('h-phone'),
+      primaryPainPoint: val('h-pain'),
+      propertyType: val('h-proptype'),
+      monthlyEvents: val('h-events'),
+      staffStrength: numVal('h-staff'),
+      location: {
+        address: '123 Seed Road',
+        city: val('h-city'),
+        state: val('h-state'),
+        country: val('h-country'),
+        pincode: numVal('h-pincode'),
+        codePointAttr: { lat: 19.0760, lng: 72.8777 }
+      }
+    };
+    log('POST /hotel (via admin) → ' + payload.name, 'info');
+    // Hotels are created by Mend Admin via send-credentials flow.
+    // We use the hotel service's createHotel which the admin controller calls:
+    const r = await api('POST', '/hotel', payload, S.adminToken);
+    const hotel = r.data;
+    S.hotelId = hotel?.id || hotel?._id;
+    S.hotelMongoId = hotel?._id;
+    log('Hotel created: id=' + S.hotelId, 'ok');
+
+    // Now login as hotel to get hotel token
+    log('Logging in as hotel: ' + payload.email + ' / hotel1234', 'info');
+    const loginR = await api('POST', '/hotel/login', { email: payload.email, password: 'hotel1234' });
+    S.hotelToken = loginR.data?.accessToken || loginR.data?.token;
+    if (!S.hotelToken) throw new Error('Hotel login succeeded but no token returned');
+    el('hotel-email-cfg').value = payload.email;
+    log('Hotel token acquired.', 'ok');
+    saveState(); updateDisplays();
+  } catch(e) { log('Hotel seed failed: ' + e.message, 'err'); }
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedUsers() {
+  if (!S.hotelToken) { log('Seed hotel and get hotel token first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Users ═══', 'head');
+  const count   = numVal('u-count');
+  const prefix  = val('u-prefix');
+  const domain  = val('u-domain');
+  const role    = val('u-role');
+  const dept    = val('u-dept');
+  const deptRole= val('u-deptrole');
+  const prof    = val('u-prof');
+  const fnTpl   = val('u-firstname-tpl');
+
+  const newUsers = [];
+  for (let i = 0; i < count; i++) {
+    const idx = S.users.length + i + 1;
+    const email = `${prefix}${idx}@${domain}`;
+    const firstName = fnTpl.replace('{N}', idx);
+    const lastName  = 'Mend';
+    try {
+      const r = await api('POST', '/user/createUser', {
+        email,
+        profile: { firstName, lastName },
+        phone: `98765${String(43200 + idx).padStart(5,'0')}`,
+        role,
+        departmentType: dept,
+        departmentRole: deptRole,
+        profession: prof,
+        availability: 'Both weekdays & weekends',
+        yearsOfExperience: '1–2 years',
+        idType: 'Aadhar Card',
+        idNumber: `SEED-AADHAAR-${idx.toString().padStart(4,'0')}`,
+      }, S.hotelToken);
+      const u = r.data;
+      newUsers.push({ id: u.id, mongoId: u._id, email, firstName });
+      log(`  [${idx}] ${firstName} <${email}> — id: ${u.id}`, 'ok');
+    } catch(e) { log(`  [${idx}] Failed: ${e.message}`, 'err'); }
+    await sleep(80);
+  }
+  S.users.push(...newUsers);
+  log(`Users seeded: ${newUsers.length} created, total: ${S.users.length}`, 'ok');
+  saveState(); updateDisplays();
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHIFTS
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedShifts() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Shifts ═══', 'head');
+  const count    = numVal('sh-count');
+  const durH     = numVal('sh-dur');
+  const gapH     = numVal('sh-gap');
+  const indices  = resolveIndices(val('sh-userindices'), S.users);
+  const employees= indices.map(i => S.users[i].id);
+
+  let startMs = el('sh-start').value ? new Date(el('sh-start').value).getTime() : Date.now() - (count * (durH + gapH) * 3600000);
+
+  for (let i = 0; i < count; i++) {
+    const startTime = new Date(startMs).toISOString();
+    const endTime   = new Date(startMs + durH * 3600000).toISOString();
+    try {
+      const r = await api('POST', '/shift/createShift', { startTime, endTime, employees }, S.hotelToken);
+      const sh = r.data;
+      S.shifts.push(sh);
+      log(`  Shift ${i+1}: ${startTime.slice(0,16)} → ${endTime.slice(11,16)} | id: ${sh.id}`, 'ok');
+    } catch(e) { log(`  Shift ${i+1} failed: ${e.message}`, 'err'); }
+    startMs += (durH + gapH) * 3600000;
+    await sleep(80);
+  }
+  log('Shifts seeded: ' + S.shifts.length + ' total.', 'ok');
+  saveState(); updateDisplays();
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATTENDANCE
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedAttendance() {
+  if (!S.hotelToken || !S.users.length || !S.hotelId) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Attendance ═══', 'head');
+  const lat      = parseFloat(val('att-lat'));
+  const lng      = parseFloat(val('att-lng'));
+  const isViol   = val('att-violation') === 'yes';
+  const durMin   = isViol ? 690 : numVal('att-dur'); // 11.5h if violation
+  const indices  = resolveIndices(val('att-userindices'), S.users);
+
+  for (const i of indices) {
+    const u = S.users[i];
+    const coords = { lat, lng, accuracy: 10 };
+    try {
+      // Clock in
+      await api('POST', '/attendance/clock-in', {
+        userId: u.id, hotelId: S.hotelId,
+        coords, deviceId: `seed-device-${i}`
+      }, S.hotelToken);
+      log(`  [${u.firstName}] Clock-in OK`, 'ok');
+      await sleep(120);
+
+      // Clock out
+      await api('POST', '/attendance/clock-out', {
+        userId: u.id, hotelId: S.hotelId,
+        coords, deviceId: `seed-device-${i}`,
+        workDurationMinutes: durMin
+      }, S.hotelToken);
+      log(`  [${u.firstName}] Clock-out OK — ${durMin}min ${isViol ? '⚠ VIOLATION' : '✓ compliant'}`, isViol ? 'warn' : 'ok');
+    } catch(e) { log(`  [${u.firstName}] Attendance failed: ${e.message}`, 'err'); }
+    await sleep(80);
+  }
+  log('Attendance seeded for ' + indices.length + ' users.', 'ok');
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TASKS
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedTasks() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Tasks ═══', 'head');
+  const perUser  = numVal('t-peruser');
+  const type     = val('t-type');
+  const priority = val('t-priority');
+  const weight   = numVal('t-weight');
+  const dur      = numVal('t-dur');
+  const complete = val('t-complete') === 'yes';
+  const titleTpl = val('t-title-tpl');
+  const manager  = S.users.find(u => true); // first user as assigner fallback
+
+  let taskIdx = S.tasks.length;
+  for (const user of S.users) {
+    for (let t = 0; t < perUser; t++) {
+      taskIdx++;
+      const title = titleTpl.replace('{N}', taskIdx);
+      try {
+        const r = await api('POST', '/tasks', {
+          assignedTo: user.id,
+          type, priority, weight,
+          title,
+          description: `[SEED] Auto-generated task #${taskIdx} for ${user.firstName}`,
+        }, S.hotelToken);
+        const task = r.data;
+        S.tasks.push(task);
+
+        if (complete) {
+          // Mark in-progress then completed
+          await api('PATCH', `/tasks/${task.id}/status`, { status: 'IN_PROGRESS' }, S.hotelToken);
+          await sleep(40);
+          await api('PATCH', `/tasks/${task.id}/status`, { status: 'COMPLETED' }, S.hotelToken);
+          log(`  [${user.firstName}] Task "${title}" — COMPLETED ✓`, 'ok');
+        } else {
+          log(`  [${user.firstName}] Task "${title}" — PENDING`, 'dim');
+        }
+        await sleep(60);
+      } catch(e) { log(`  Task failed: ${e.message}`, 'err'); }
+    }
+  }
+  log(`Tasks seeded: ${S.tasks.length} total.`, 'ok');
+  saveState(); updateDisplays();
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WELLBEING
+// ─────────────────────────────────────────────────────────────────────────────
+function applyWbScenario(scenario) {
+  const m = { normal: [5,8,2], moderate: [3,6,5], high: [2,5,7], critical: [1,3,10] };
+  const [r,s,st] = m[scenario] || [3,6,5];
+  el('wb-rating').value = r;
+  el('wb-sleep').value  = s;
+  el('wb-stress').value = st;
+}
+
+async function seedWellbeing() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Wellbeing ═══', 'head');
+  const rating  = numVal('wb-rating');
+  const sleep_h = parseFloat(el('wb-sleep').value);
+  const stress  = numVal('wb-stress');
+  const indices = resolveIndices(val('wb-userindices'), S.users);
+
+  for (const i of indices) {
+    const u = S.users[i];
+    try {
+      const r = await api('POST', '/wellbeing', {
+        userId: u.id,
+        rating,
+        sleepHours: sleep_h,
+        stressLevel: stress,
+      }, S.hotelToken);
+      const wb = r.data;
+      log(`  [${u.firstName}] Wellbeing: rating=${rating}, fatigue=${wb.fatigueScore}, risk=${wb.fatigueRisk}`, wb.fatigueRisk === 'HIGH' || wb.fatigueRisk === 'CRITICAL' ? 'warn' : 'ok');
+    } catch(e) { log(`  [${u.firstName}] Wellbeing failed: ${e.message}`, 'err'); }
+    await sleep(80);
+  }
+  log('Wellbeing seeded.', 'ok');
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOS
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedSOS() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Triggering SOS ═══', 'head');
+  const idx     = numVal('sos-userindex');
+  const user    = S.users[idx];
+  if (!user) { log('Invalid user index.', 'err'); setBusy(false); return; }
+
+  try {
+    const r = await api('POST', '/sos/trigger', {
+      userId: user.id,
+      message: val('sos-msg'),
+      location: {
+        type: 'Point',
+        coordinates: [parseFloat(val('sos-lng')), parseFloat(val('sos-lat'))]
+      }
+    }, S.hotelToken);
+    const sos = r.data;
+    log(`SOS triggered: id=${sos.id}, status=${sos.status}`, 'warn');
+
+    if (val('sos-resolve') === 'yes') {
+      await sleep(300);
+      await api('PUT', `/sos/${sos.id}/resolve`, {}, S.hotelToken);
+      log(`SOS ${sos.id} resolved.`, 'ok');
+    }
+  } catch(e) { log('SOS failed: ' + e.message, 'err'); }
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LMS
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedLMS() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding LMS ═══', 'head');
+
+  try {
+    // 1. Create course
+    log('Creating course…', 'info');
+    const cr = await api('POST', '/lms/courses', {
+      title: val('lms-title'),
+      description: '[SEED] Auto-generated course for Mend HES compliance testing.',
+      category: val('lms-cat'),
+      thumbnailUrl: 'https://placehold.co/600x400/00C48C/000000?text=SEED+COURSE',
+      createdBy: S.users[0]?.id || 'system',
+    }, S.hotelToken);
+    const course = cr.data;
+    S.lmsCourseId = course.id;
+    log('Course created: ' + course.id, 'ok');
+
+    // 2. Publish course
+    await api('PATCH', `/lms/courses/${course.id}/status`, { status: 'PUBLISHED' }, S.hotelToken);
+    log('Course published.', 'ok');
+
+    // 3. Create lecture
+    const lr = await api('POST', `/lms/courses/${course.id}/lectures`, {
+      title: val('lms-lec'),
+      description: '[SEED] Auto-generated lecture.',
+      videoUrl: val('lms-video'),
+      duration: 600,
+      notes: '# SEED NOTES\nThis is a seeded lecture for testing purposes.',
+      order: 1,
+    }, S.hotelToken);
+    const lecture = lr.data;
+    log('Lecture created: ' + lecture.id, 'ok');
+
+    // 4. Create assessment (required for certificate)
+    const ar = await api('POST', `/lms/courses/${course.id}/assessment`, {
+      passingScore: 60,
+      timeLimitMinutes: 30,
+      questions: [
+        {
+          text: '[SEED] What is the Mend HES standard max work hours per day?',
+          type: 'SINGLE_CHOICE',
+          options: ['8 hours', '10 hours', '12 hours', '14 hours'],
+          correctIndex: 1,
+          points: 10,
+        },
+        {
+          text: '[SEED] Minimum recovery hours between shifts?',
+          type: 'SINGLE_CHOICE',
+          options: ['8 hours', '10 hours', '12 hours', '14 hours'],
+          correctIndex: 3,
+          points: 10,
+        },
+      ],
+    }, S.hotelToken);
+    S.lmsAssessmentId = ar.data?.id;
+    log('Assessment created.', 'ok');
+
+    const indices = resolveIndices(val('lms-userindices'), S.users);
+    const doPass  = val('lms-pass') === 'yes';
+
+    for (const i of indices) {
+      const u = S.users[i];
+      try {
+        // Enroll
+        await api('POST', `/lms/courses/${course.id}/enroll`, { userId: u.id }, S.hotelToken);
+        log(`  [${u.firstName}] Enrolled`, 'ok');
+
+        // Mark lecture complete
+        await api('POST', `/lms/courses/${course.id}/lectures/${lecture.id}/complete`, { userId: u.id }, S.hotelToken);
+        log(`  [${u.firstName}] Lecture marked complete`, 'ok');
+
+        if (doPass) {
+          // Start attempt
+          const attemptR = await api('POST', `/lms/courses/${course.id}/assessment/attempt`, { userId: u.id }, S.hotelToken);
+          const attempt = attemptR.data;
+          log(`  [${u.firstName}] Attempt started: ${attempt.id}`, 'dim');
+
+          // Submit with all correct answers
+          await api('POST', `/lms/assessment/attempts/${attempt.id}/submit`, {
+            userId: u.id,
+            answers: [{ questionIndex: 0, selectedIndex: 1 }, { questionIndex: 1, selectedIndex: 3 }],
+          }, S.hotelToken);
+          log(`  [${u.firstName}] Assessment PASSED — certificate issued ✓`, 'ok');
+        }
+      } catch(e) { log(`  [${u.firstName}] LMS error: ${e.message}`, 'err'); }
+      await sleep(150);
+    }
+    log('LMS seeding complete.', 'ok');
+  } catch(e) { log('LMS seed failed: ' + e.message, 'err'); }
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PASSPORT
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedPassports() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Passports ═══', 'head');
+  const indices  = resolveIndices(val('pp-userindices'), S.users);
+  const skills   = val('pp-skills').split(',').map(s => s.trim()).filter(Boolean);
+  const doSync   = val('pp-sync') === 'yes';
+  const careerFrom = val('pp-career-from');
+  const careerTitle= val('pp-career-title');
+  const careerHotel= val('pp-career-hotel');
+
+  for (const i of indices) {
+    const u = S.users[i];
+    try {
+      // Create passport
+      const r = await api('POST', '/passport', { userId: u.id }, S.hotelToken);
+      const pp = r.data;
+      log(`  [${u.firstName}] Passport created: ${pp.credentialNumber}`, 'ok');
+
+      // Update skills + career
+      await api('PUT', `/passport/${u.id}`, {
+        skills,
+        careerProgression: [{ title: careerTitle, hotel: careerHotel, from: careerFrom }],
+      }, S.hotelToken);
+      log(`  [${u.firstName}] Skills + career updated`, 'ok');
+
+      // Sync live data
+      if (doSync) {
+        await api('POST', `/passport/${u.id}/sync`, {}, S.hotelToken);
+        log(`  [${u.firstName}] Passport synced (LMS certs + efficiency)`, 'ok');
+      }
+    } catch(e) { log(`  [${u.firstName}] Passport error: ${e.message}`, 'err'); }
+    await sleep(100);
+  }
+  log('Passports seeded.', 'ok');
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECRUITMENT
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedRecruitment() {
+  if (!S.hotelToken || !S.users.length) { log('Seed hotel + users first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Seeding Recruitment ═══', 'head');
+  const jobCount  = numVal('rc-count');
+  const targetStatus = val('rc-progress');
+  const indices   = resolveIndices(val('rc-applicants'), S.users);
+
+  const jobPayload = {
+    title: val('rc-title'),
+    description: '[SEED] Auto-generated job posting for testing the recruitment pipeline.',
+    department: val('rc-dept'),
+    employmentType: val('rc-emptype'),
+    vacancies: numVal('rc-vacancies'),
+    shiftPolicy: val('rc-shift'),
+    recoveryPolicy: val('rc-recovery'),
+    certificationRequired: val('rc-cert'),
+    requiredSkills: val('rc-skills').split(',').map(s=>s.trim()).filter(Boolean),
+    experienceRequired: '1+ years',
+    salaryMin: numVal('rc-salmin'),
+    salaryMax: numVal('rc-salmax'),
+    salaryCurrency: 'INR',
+    expiresAt: new Date(Date.now() + 30*24*3600000).toISOString(),
+    postedBy: S.users[0]?.id || 'system',
+  };
+
+  const TRANSITIONS = ['UNDER_REVIEW', 'SHORTLISTED', 'HIRED'];
+
+  for (let j = 0; j < jobCount; j++) {
+    try {
+      // Create job
+      const title = jobPayload.title + ` [${j+1}]`;
+      const jr = await api('POST', '/recruitment/jobs', { ...jobPayload, title }, S.hotelToken);
+      const job = jr.data;
+      S.jobs.push(job);
+      log(`  Job created: "${title}" — id: ${job.id}`, 'ok');
+
+      // Publish
+      await api('PATCH', `/recruitment/jobs/${job.id}/publish`, {}, S.hotelToken);
+      log(`  Job ${job.id} published.`, 'ok');
+
+      // Apply with each user
+      for (const i of indices) {
+        const u = S.users[i];
+        try {
+          const appR = await api('POST', `/recruitment/jobs/${job.id}/apply`, {
+            applicantId: u.id,
+            coverNote: `[SEED] Application from ${u.firstName} — automated seeder test.`,
+          }, S.hotelToken);
+          const app = appR.data;
+          S.applications.push(app);
+          log(`    [${u.firstName}] Applied — app id: ${app.id}`, 'ok');
+
+          // Progress through status transitions
+          const target = TRANSITIONS.indexOf(targetStatus);
+          for (let step = 0; step <= target; step++) {
+            await sleep(80);
+            await api('PATCH', `/recruitment/applications/${app.id}/review`, {
+              status: TRANSITIONS[step],
+              notes: `[SEED] Auto-progressed to ${TRANSITIONS[step]}`,
+            }, S.hotelToken);
+            log(`    → ${TRANSITIONS[step]}`, 'dim');
+          }
+        } catch(e) { log(`    [${u.firstName}] Apply failed: ${e.message}`, 'err'); }
+        await sleep(80);
+      }
+    } catch(e) { log(`  Job ${j+1} failed: ${e.message}`, 'err'); }
+  }
+  log(`Recruitment seeded: ${S.jobs.length} jobs, ${S.applications.length} applications.`, 'ok');
+  saveState(); updateDisplays();
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPLIANCE
+// ─────────────────────────────────────────────────────────────────────────────
+async function seedCompliance() {
+  if (!S.adminToken || !S.hotelId) { log('Admin login + seed hotel first.', 'err'); return; }
+  setBusy(true);
+  log('═══ Running Compliance Evaluation ═══', 'head');
+  try {
+    const r = await api('POST', `/compliance/evaluate/${S.hotelId}`, {
+      windowDays: numVal('comp-window'),
+    }, S.adminToken);
+    const report = r.data;
+    const expected = val('comp-expected');
+    const actual   = report.certificationLevel;
+    const match    = actual === expected;
+
+    const resultEl = el('comp-result');
+    resultEl.style.display = '';
+    resultEl.textContent = JSON.stringify(report, null, 2);
+
+    log(`Compliance score: ${report.complianceScore}/100`, 'ok');
+    log(`Certification:    ${actual}`, actual === 'None' ? 'warn' : 'ok');
+    log(`Eligible to hire: ${report.isEligibleToHire}`, report.isEligibleToHire ? 'ok' : 'warn');
+    log(`Breakdown — Attendance:${report.breakdown.attendanceScore} Wellbeing:${report.breakdown.wellbeingScore} Fatigue:${report.breakdown.fatigueScore} Efficiency:${report.breakdown.efficiencyScore}`, 'dim');
+    if (match) log(`✓ Result matches expected tier "${expected}"`, 'ok');
+    else log(`⚠ Expected "${expected}" but got "${actual}"`, 'warn');
+  } catch(e) { log('Compliance evaluation failed: ' + e.message, 'err'); }
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FULL SEED — orchestrated scenario
+// ─────────────────────────────────────────────────────────────────────────────
+async function runFullSeed() {
+  if (!S.adminToken) { log('Login as admin first.', 'err'); showTab('config'); return; }
+  const btn = el('btn-fullseed');
+  btn.disabled = true;
+  el('full-progress-wrap').style.display = '';
+  setBusy(true);
+
+  const suffix   = val('full-suffix');
+  const userCount= numVal('full-users');
+  const scenario = val('full-scenario');
+  const doLMS    = val('full-lms') === 'yes';
+
+  const setProgress = (pct, label) => {
+    el('full-progress-bar').style.width = pct + '%';
+    el('full-progress-label').textContent = label;
+  };
+
+  log('', 'dim');
+  log('╔══════════════════════════════════╗', 'head');
+  log('║  MEND FULL SCENARIO SEED         ║', 'head');
+  log(`║  Suffix: ${suffix.padEnd(24)}║`, 'head');
+  log(`║  Scenario: ${scenario.padEnd(22)}║`, 'head');
+  log('╚══════════════════════════════════╝', 'head');
+
+  try {
+    // ── 1. Hotel ────────────────────────────────────────────────────────────
+    setProgress(5, 'Creating hotel tenant…');
+    el('h-name').value    = `[SEED-${suffix}] Grand Mend Hotel`;
+    el('h-email').value   = `hotel${suffix}@mendtest.in`;
+    el('h-phone').value   = String(9800000000 + parseInt(suffix,10));
+    await seedHotel();
+
+    // ── 2. Users ─────────────────────────────────────────────────────────────
+    setProgress(15, `Creating ${userCount} employees…`);
+    el('u-count').value   = userCount;
+    el('u-prefix').value  = `s${suffix}emp`;
+    el('u-domain').value  = 'mendtest.in';
+    el('u-role').value    = 'EMPLOYEE';
+    await seedUsers();
+
+    // Seed one manager
+    setProgress(20, 'Creating manager…');
+    el('u-count').value   = 1;
+    el('u-prefix').value  = `s${suffix}mgr`;
+    el('u-role').value    = 'MANAGER';
+    el('u-deptrole').value= 'FNB_MANAGER';
+    await seedUsers();
+
+    // ── 3. Shifts ────────────────────────────────────────────────────────────
+    setProgress(28, 'Creating shifts…');
+    el('sh-count').value  = 4;
+    el('sh-dur').value    = 9;
+    el('sh-gap').value    = 15;
+    el('sh-userindices').value = 'all';
+    await seedShifts();
+
+    // ── 4. Attendance ────────────────────────────────────────────────────────
+    setProgress(38, 'Seeding attendance…');
+    el('att-violation').value = scenario === 'noncompliant' ? 'yes' : 'no';
+    el('att-dur').value       = scenario === 'compliant' ? 480 : 540;
+    el('att-userindices').value = 'all';
+    await seedAttendance();
+
+    // ── 5. Tasks ──────────────────────────────────────────────────────────────
+    setProgress(48, 'Seeding tasks…');
+    el('t-peruser').value  = scenario === 'compliant' ? 5 : 3;
+    el('t-weight').value   = scenario === 'compliant' ? 8 : 5;
+    el('t-complete').value = 'yes';
+    await seedTasks();
+
+    // ── 6. Wellbeing ──────────────────────────────────────────────────────────
+    setProgress(58, 'Seeding wellbeing…');
+    const wbMap = { compliant:[5,8,2], moderate:[3,6,5], noncompliant:[1,4,9] };
+    const [wbR,wbS,wbSt] = wbMap[scenario];
+    el('wb-rating').value = wbR; el('wb-sleep').value = wbS; el('wb-stress').value = wbSt;
+    el('wb-userindices').value = 'all';
+    await seedWellbeing();
+
+    // ── 7. LMS + Passports ────────────────────────────────────────────────────
+    if (doLMS) {
+      setProgress(65, 'Seeding LMS…');
+      el('lms-title').value = `[SEED-${suffix}] Hospitality Excellence Course`;
+      el('lms-userindices').value = 'all';
+      el('lms-pass').value = 'yes';
+      await seedLMS();
+
+      setProgress(75, 'Seeding passports…');
+      el('pp-userindices').value = 'all';
+      el('pp-sync').value = 'yes';
+      await seedPassports();
+    }
+
+    // ── 8. Recruitment ────────────────────────────────────────────────────────
+    setProgress(82, 'Seeding recruitment…');
+    el('rc-title').value    = `[SEED-${suffix}] Head Waiter`;
+    el('rc-count').value    = 2;
+    el('rc-progress').value = scenario === 'noncompliant' ? 'APPLIED' : 'SHORTLISTED';
+    el('rc-applicants').value = 'all';
+    await seedRecruitment();
+
+    // ── 9. Compliance ─────────────────────────────────────────────────────────
+    setProgress(92, 'Running compliance evaluation…');
+    el('comp-window').value = 30;
+    el('comp-expected').value = scenario === 'compliant' ? 'Mend Gold Seal' : scenario === 'moderate' ? 'Mend Certified' : 'None';
+    await seedCompliance();
+
+    setProgress(100, 'Complete!');
+    log('', 'dim');
+    log('╔══════════════════════════════════╗', 'ok');
+    log('║  FULL SEED COMPLETE              ║', 'ok');
+    log(`║  Hotel: ${S.hotelId?.padEnd(23)}║`, 'ok');
+    log(`║  Users: ${String(S.users.length).padEnd(23)}║`, 'ok');
+    log(`║  Tasks: ${String(S.tasks.length).padEnd(23)}║`, 'ok');
+    log(`║  Jobs:  ${String(S.jobs.length).padEnd(23)}║`, 'ok');
+    log('╚══════════════════════════════════╝', 'ok');
+
+  } catch(e) {
+    log('Full seed encountered an error: ' + e.message, 'err');
+  }
+  btn.disabled = false;
+  setBusy(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OVERVIEW
+// ─────────────────────────────────────────────────────────────────────────────
+const CHAIN = [
+  { name:'1. Admin Login',     desc:'Required first. Admin JWT drives hotel creation and compliance evaluation.', deps:[], status:'admin' },
+  { name:'2. Hotel',           desc:'Creates hotel tenant. Returns hotel JWT used for all subsequent module calls.', deps:['Admin Login'], status:'hotel' },
+  { name:'3. Users',           desc:'Employee and manager profiles. Require hotel JWT. IDs drive attendance, tasks, wellbeing.', deps:['Hotel'], status:'users' },
+  { name:'4. Shifts',          desc:'Shifts assign users. Reference user IDs. Required for roster completeness.', deps:['Users'], status:'shifts' },
+  { name:'5. Attendance',      desc:'Clock-in / clock-out per user. Drives HES violation flags. Required for compliance score.', deps:['Users','Hotel coords'], status:'none' },
+  { name:'6. Tasks',           desc:'Assigned to users. Completion drives OPH / efficiency score. Required for compliance efficiency component.', deps:['Users'], status:'tasks' },
+  { name:'7. Wellbeing',       desc:'One per user per day. Drives fatigue score + manager alerts. Required for compliance wellbeing component.', deps:['Users'], status:'none' },
+  { name:'8. SOS',             desc:'Optional. Tests alert escalation chain.', deps:['Users'], status:'none' },
+  { name:'9. LMS',             desc:'Course → lecture → assessment → enroll → complete → certificate. Required for Passport certifications field.', deps:['Users'], status:'none' },
+  { name:'10. Passport',       desc:'Created per user. Syncs LMS certs + efficiency score. Required for recruitment ranking.', deps:['Users','LMS (for certs)'], status:'none' },
+  { name:'11. Recruitment',    desc:'Job posting → publish → apply → shortlist. Depends on hotel compliance tier for hiring eligibility.', deps:['Users','Compliance (for block gate)'], status:'jobs' },
+  { name:'12. Compliance',     desc:'Evaluates hotel using Attendance + Wellbeing + Tasks data. Assigns cert tier. Must run after all modules above.', deps:['Attendance','Tasks','Wellbeing'], status:'none' },
+];
+
+function renderOverview() {
+  const grid = el('chain-items');
+  grid.innerHTML = CHAIN.map((item, idx) => {
+    const hasStatus = item.status !== 'none';
+    const count = item.status === 'admin' ? (S.adminToken ? 1 : 0)
+                : item.status === 'hotel' ? (S.hotelId ? 1 : 0)
+                : item.status === 'users' ? S.users.length
+                : item.status === 'shifts' ? S.shifts.length
+                : item.status === 'tasks' ? S.tasks.length
+                : item.status === 'jobs' ? S.jobs.length : 0;
+    const done = count > 0;
+    const isLast = idx === CHAIN.length - 1;
+    return `
+      <div style="display:flex;gap:14px;padding-bottom:${isLast?'0':'16px'};position:relative;">
+        <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+          <div style="width:28px;height:28px;border-radius:50%;background:${done?'var(--green)':'#1E1E1E'};border:1.5px solid ${done?'var(--green)':'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${done?'#000':'var(--muted)'};">${done?'✓':idx+1}</div>
+          ${!isLast ? `<div style="width:1px;background:${done?'rgba(0,196,140,.3)':'var(--border)'};flex:1;margin-top:4px;min-height:20px;"></div>` : ''}
+        </div>
+        <div style="padding-bottom:${isLast?'0':'4px'};">
+          <div style="font-size:13px;font-weight:600;color:${done?'var(--text)':'#888'};margin-bottom:2px;">${item.name} ${hasStatus && done ? `<span class="pill pill-green" style="font-size:10px;">${count}</span>` : ''}</div>
+          <div style="font-size:12px;color:var(--muted);line-height:1.5;">${item.desc}</div>
+          ${item.deps.length ? `<div style="font-size:11px;color:#555;margin-top:3px;">Requires: ${item.deps.join(', ')}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  loadState();
+  // Set default shift start to now - 2 days
+  const d = new Date(Date.now() - 2*24*3600000);
+  d.setMinutes(0,0,0);
+  const local = new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  if (el('sh-start')) el('sh-start').value = local;
+
+  // Default passport career from
+  if (el('pp-career-from')) el('pp-career-from').value = '2024-01-01';
+  if (el('comp-window')) el('comp-window').value = 30;
+
+  log('Mend Seeder ready. Set your backend URL and login as admin to begin.', 'info');
+  log('Recommended flow: Connection → Hotel → Users → Shifts → Attendance → Tasks → Wellbeing → LMS → Passport → Recruitment → Compliance', 'dim');
+});
+</script>
+</body>
+</html>

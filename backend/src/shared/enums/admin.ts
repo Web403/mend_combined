@@ -1,0 +1,12 @@
+export enum AdminRole {
+  MENDADMIN = "MENDADMIN",
+  SUPER_ADMIN = "SUPER_ADMIN",
+  HOTEL_ADMIN = "HOTEL_ADMIN",
+  TENANT_ADMIN = "TENANT_ADMIN"
+}
+
+export enum AdminStatus {
+  ACTIVE = "ACTIVE",
+  INACTIVE = "INACTIVE",
+  SUSPENDED = "SUSPENDED"
+}

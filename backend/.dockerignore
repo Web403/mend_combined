@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+serviceAccountKey.json
+.env
+.git
+.gitignore
+README.md
+.env
+.nyc_output
+coverage
+.coverage
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store

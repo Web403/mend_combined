@@ -1,0 +1,4 @@
+firstName,lastName,email,role,dob,departmentType,departmentRole
+John,Doe,john@hotel.com,EMPLOYEE,1990-05-12,FRONT_OFFICE,RECEPTIONIST
+Jane,Smith,jane@hotel.com,MANAGER,1992-08-20,KITCHEN,EXECUTIVE_CHEF
+Raj,Kumar,raj@hotel.com,EMPLOYEE,1988-03-15,SECURITY,SECURITY_GUARD
