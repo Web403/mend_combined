@@ -1,0 +1,25 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import PageLayout from "../../../components/PageLayout";
+import { getTasks } from "../../../api/services/tasks";
+
+const initialFilters = { page: 1, limit: 10, search: "", status: "", priority: "" };
+const badge = (value) => ({ HIGH: "bg-red-100 text-red-700", MEDIUM: "bg-amber-100 text-amber-700", LOW: "bg-green-100 text-green-700", COMPLETED: "bg-green-100 text-green-700", IN_PROGRESS: "bg-blue-100 text-blue-700" }[value] || "bg-slate-100 text-slate-700");
+
+const Tasks = () => {
+  const [filters, setFilters] = useState(initialFilters);
+  const [tasks, setTasks] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const query = useMemo(() => Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== "")), [filters]);
+  const load = useCallback(async () => { try { setLoading(true); setError(""); const result = await getTasks(query); setTasks(Array.isArray(result.data) ? result.data : []); setPagination(result.pagination || { page: 1, limit: 10, total: 0, totalPages: 1 }); } catch (err) { setError(err?.response?.data?.message || "Unable to fetch tasks."); } finally { setLoading(false); } }, [query]);
+  useEffect(() => { const timer = setTimeout(load, 0); return () => clearTimeout(timer); }, [load]);
+  const update = (key, value) => setFilters((current) => ({ ...current, page: key === "page" ? value : 1, [key]: value }));
+  return <PageLayout title="Tasks" description="Assign and monitor employee tasks."><div className="space-y-5">
+    <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-4"><input value={filters.search} onChange={(event) => update("search", event.target.value)} placeholder="Search title or description" className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-blue-500" /><select value={filters.status} onChange={(event) => update("status", event.target.value)} className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm"><option value="">All statuses</option><option value="PENDING">Pending</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select><select value={filters.priority} onChange={(event) => update("priority", event.target.value)} className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm"><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option></select><button type="button" onClick={load} disabled={loading} className="rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium disabled:opacity-60">{loading ? "Loading..." : "Refresh"}</button></div>
+    {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-slate-100 text-slate-700"><tr><th className="px-5 py-4">Task</th><th className="px-5 py-4">Due</th><th className="px-5 py-4">Priority</th><th className="px-5 py-4">Progress</th><th className="px-5 py-4">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan="5" className="px-5 py-16 text-center">Loading tasks...</td></tr> : tasks.length === 0 ? <tr><td colSpan="5" className="px-5 py-16 text-center">No tasks found.</td></tr> : tasks.map((task) => <tr key={task.id || task._id}><td className="px-5 py-4"><p className="font-medium text-slate-800">{task.title}</p><p className="text-xs text-slate-500">{task.description}</p></td><td className="px-5 py-4">{task.date ? new Date(task.date).toLocaleDateString("en-IN") : "-"}<p className="text-xs text-slate-500">{task.dueTime}</p></td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${badge(task.priority)}`}>{task.priority}</span></td><td className="px-5 py-4">{task.taskDetail?.progress ?? 0}%</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${badge(task.status)}`}>{task.status}</span></td></tr>)}</tbody></table></div></div>
+    <div className="flex justify-end gap-3 text-sm"><button type="button" onClick={() => update("page", pagination.page - 1)} disabled={loading || pagination.page <= 1} className="rounded border px-3 py-1 disabled:opacity-50">Previous</button><span>Page {pagination.page} of {pagination.totalPages || 1}</span><button type="button" onClick={() => update("page", pagination.page + 1)} disabled={loading || pagination.page >= pagination.totalPages} className="rounded border px-3 py-1 disabled:opacity-50">Next</button></div>
+  </div></PageLayout>;
+};
+export default Tasks;
