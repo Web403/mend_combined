@@ -7,11 +7,13 @@ import {
   getHotelAnalytics,
   getHotelProfile,
   getHotels,
+  hotelKey,
   promoteHotelUser,
   updateHotel,
   updateHotelStatus,
   updateHotelSubscription,
 } from "../api/hotels"
+import { getErrorMessage } from "../api/api"
 import { sendCredentials } from "../api/credentials"
 import ConfirmModal from "../components/ConfirmModal"
 
@@ -746,7 +748,7 @@ export default function Hotels() {
       setHotels(result.hotels)
       setPagination(result.pagination)
     } catch (e) {
-      setError(e?.response?.data?.message || "Failed to load hotels.")
+      setError(getErrorMessage(e, "Failed to load hotels. Hotel admin APIs require SUPER_ADMIN."))
     } finally {
       setLoading(false)
     }
@@ -773,7 +775,7 @@ export default function Hotels() {
         subscriptionExpiresAt: profile?.subscriptionExpiresAt ? profile.subscriptionExpiresAt.slice(0, 10) : "",
       })
     } catch (e) {
-      setDetailError(e?.response?.data?.message || "Failed to load hotel profile.")
+      setDetailError(getErrorMessage(e, "Failed to load hotel profile. Requires SUPER_ADMIN."))
     } finally {
       setDetailLoading(false)
     }
@@ -862,13 +864,14 @@ export default function Hotels() {
     setSavingHotel(true)
     try {
       const payload = buildHotelPayload(hotelForm)
+      const targetId = hotelKey(hotelFormTarget)
       const saved = hotelFormMode === "edit"
-        ? await updateHotel(hotelFormTarget.id, payload)
+        ? await updateHotel(targetId, payload)
         : await createHotel(payload)
 
       if (hotelFormMode === "edit") {
-        setHotels((items) => items.map((item) => (item.id === hotelFormTarget.id ? { ...item, ...saved } : item)))
-        setSelectedHotel((current) => (current?.id === hotelFormTarget.id ? { ...current, ...saved } : current))
+        setHotels((items) => items.map((item) => (hotelKey(item) === targetId ? { ...item, ...saved } : item)))
+        setSelectedHotel((current) => (hotelKey(current) === targetId ? { ...current, ...saved } : current))
         showToast("success", "Hotel updated successfully")
       } else {
         showToast("success", "Hotel created successfully")
@@ -878,7 +881,7 @@ export default function Hotels() {
       setHotelFormOpen(false)
       setHotelFormTarget(null)
     } catch (e) {
-      showToast("error", e?.response?.data?.message || `Failed to ${hotelFormMode === "edit" ? "update" : "create"} hotel.`)
+      showToast("error", getErrorMessage(e, `Failed to ${hotelFormMode === "edit" ? "update" : "create"} hotel.`))
     } finally {
       setSavingHotel(false)
     }
@@ -902,7 +905,7 @@ export default function Hotels() {
       showToast("success", `Credentials sent to ${confirmTarget.name}`)
     } catch (e) {
       setConfirmTarget(null)
-      showToast("error", e?.response?.data?.message || "Failed to send credentials.")
+      showToast("error", getErrorMessage(e, "Failed to send credentials. Requires MENDADMIN."))
     } finally {
       setSending(false)
     }
@@ -913,7 +916,7 @@ export default function Hotels() {
     setDeletingHotel(true)
     try {
       await deleteHotel(deleteConfirmTarget.id)
-      setHotels((items) => items.filter((item) => item.id !== deleteConfirmTarget.id))
+      setHotels((items) => items.filter((item) => hotelKey(item) !== deleteConfirmTarget.id))
       setPagination((current) => ({ ...current, total: Math.max(0, current.total - 1) }))
       if (selectedHotelId === deleteConfirmTarget.id) {
         setSelectedHotelId(null)
@@ -924,7 +927,7 @@ export default function Hotels() {
       setDeleteConfirmTarget(null)
       fetchHotels()
     } catch (e) {
-      showToast("error", e?.response?.data?.message || "Failed to delete hotel.")
+      showToast("error", getErrorMessage(e, "Failed to delete hotel."))
     } finally {
       setDeletingHotel(false)
     }
@@ -934,12 +937,13 @@ export default function Hotels() {
     if (!selectedHotel) return
     setUpdatingStatus(true)
     try {
-      const updated = await updateHotelStatus(selectedHotel.id, !selectedHotel.isActive)
+      const id = hotelKey(selectedHotel)
+      const updated = await updateHotelStatus(id, !selectedHotel.isActive)
       setSelectedHotel((current) => ({ ...current, ...updated }))
-      setHotels((items) => items.map((item) => (item.id === selectedHotel.id ? { ...item, ...updated } : item)))
+      setHotels((items) => items.map((item) => (hotelKey(item) === id ? { ...item, ...updated } : item)))
       showToast("success", `Hotel ${updated?.isActive ? "activated" : "deactivated"} successfully`)
     } catch (e) {
-      showToast("error", e?.response?.data?.message || "Failed to update hotel status.")
+      showToast("error", getErrorMessage(e, "Failed to update hotel status."))
     } finally {
       setUpdatingStatus(false)
     }
@@ -949,17 +953,18 @@ export default function Hotels() {
     if (!selectedHotel) return
     setSavingSubscription(true)
     try {
+      const id = hotelKey(selectedHotel)
       const payload = Object.fromEntries(
         Object.entries(subscriptionForm)
           .filter(([, value]) => value)
           .map(([key, value]) => [key, key === "subscriptionExpiresAt" ? new Date(`${value}T00:00:00.000Z`).toISOString() : value])
       )
-      const updated = await updateHotelSubscription(selectedHotel.id, payload)
+      const updated = await updateHotelSubscription(id, payload)
       setSelectedHotel((current) => ({ ...current, ...updated }))
-      setHotels((items) => items.map((item) => (item.id === selectedHotel.id ? { ...item, ...updated } : item)))
+      setHotels((items) => items.map((item) => (hotelKey(item) === id ? { ...item, ...updated } : item)))
       showToast("success", "Subscription updated successfully")
     } catch (e) {
-      showToast("error", e?.response?.data?.message || "Failed to update subscription.")
+      showToast("error", getErrorMessage(e, "Failed to update subscription."))
     } finally {
       setSavingSubscription(false)
     }
@@ -990,7 +995,7 @@ export default function Hotels() {
           },
         },
       }) || {}
-      const result = await createHotelUsers(selectedHotel.id, payload)
+      const result = await createHotelUsers(hotelKey(selectedHotel), payload)
       setUserOperationResult(result)
       setHotelUserForm({
         email: "",
@@ -1006,7 +1011,7 @@ export default function Hotels() {
       })
       showToast("success", result?.message || "Hotel user creation completed")
     } catch (e) {
-      showToast("error", e?.response?.data?.message || "Failed to create hotel user.")
+      showToast("error", getErrorMessage(e, "Failed to create hotel user."))
     } finally {
       setCreatingHotelUser(false)
     }
@@ -1017,12 +1022,12 @@ export default function Hotels() {
 
     setUploadingBulkUsers(true)
     try {
-      const result = await bulkUploadHotelUsers(selectedHotel.id, bulkFile)
+      const result = await bulkUploadHotelUsers(hotelKey(selectedHotel), bulkFile)
       setUserOperationResult(result)
       setBulkFile(null)
       showToast("success", result?.message || "Bulk hotel user upload completed")
     } catch (e) {
-      showToast("error", e?.response?.data?.message || "Failed to upload hotel users.")
+      showToast("error", getErrorMessage(e, "Failed to upload hotel users."))
     } finally {
       setUploadingBulkUsers(false)
     }
@@ -1042,7 +1047,7 @@ export default function Hotels() {
         departmentType: promoteForm.departmentType,
         departmentRole: promoteForm.departmentRole,
       }) || {}
-      const result = await promoteHotelUser(selectedHotel.id, promoteForm.userId.trim(), payload)
+      const result = await promoteHotelUser(hotelKey(selectedHotel), promoteForm.userId.trim(), payload)
       setUserOperationResult(result)
       setPromoteForm({
         userId: "",
@@ -1052,7 +1057,7 @@ export default function Hotels() {
       })
       showToast("success", result?.message || "User role updated successfully")
     } catch (e) {
-      showToast("error", e?.response?.data?.message || "Failed to promote hotel user.")
+      showToast("error", getErrorMessage(e, "Failed to promote hotel user."))
     } finally {
       setPromotingHotelUser(false)
     }
@@ -1072,8 +1077,9 @@ export default function Hotels() {
       />
       <ConfirmModal
         open={!!deleteConfirmTarget}
+        danger
         title="Delete hotel"
-        description={`Delete "${deleteConfirmTarget?.name}"? This action cannot be undone.`}
+        description={`Delete "${deleteConfirmTarget?.name}"? This permanently removes the tenant record and cannot be undone.`}
         confirmLabel="Delete hotel"
         loading={deletingHotel}
         onConfirm={handleDeleteHotel}
@@ -1113,7 +1119,7 @@ export default function Hotels() {
         onSaveSubscription={handleSaveSubscription}
         onToggleStatus={handleToggleStatus}
         onEditHotel={() => openEditHotel(selectedHotel)}
-        onDeleteHotel={() => selectedHotel && setDeleteConfirmTarget({ id: selectedHotel.id, name: selectedHotel.name })}
+        onDeleteHotel={() => selectedHotel && setDeleteConfirmTarget({ id: hotelKey(selectedHotel), name: selectedHotel.name })}
         onCreateHotelUser={handleCreateHotelUser}
         onBulkUploadUsers={handleBulkUploadUsers}
         onPromoteHotelUser={handlePromoteHotelUser}
@@ -1218,11 +1224,13 @@ export default function Hotels() {
               {!loading && hotels.length === 0 && (
                 <tr><td colSpan={8} className="py-12 text-center text-sm text-slate-400">No hotels found for the current filters.</td></tr>
               )}
-              {hotels.map((h) => (
-                <tr key={h.id} className="border-b border-slate-100 hover:bg-slate-50/70 transition-colors">
+              {hotels.map((h) => {
+                const id = hotelKey(h)
+                return (
+                <tr key={id} className="border-b border-slate-100 hover:bg-slate-50/70 transition-colors">
                   <td className="px-4 py-3 min-w-[220px]">
                     <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarClass(h.id)}`}>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarClass(id)}`}>
                         {getInitials(h.name)}
                       </div>
                       <div className="min-w-0">
@@ -1256,7 +1264,7 @@ export default function Hotels() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 justify-end">
                       <button
-                        onClick={() => openHotel(h.id)}
+                        onClick={() => openHotel(id)}
                         className="inline-flex items-center px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition whitespace-nowrap"
                       >
                         View
@@ -1268,13 +1276,13 @@ export default function Hotels() {
                         Edit
                       </button>
                       <button
-                        onClick={() => setConfirmTarget({ id: h.id, name: h.name })}
+                        onClick={() => setConfirmTarget({ id, name: h.name })}
                         className="inline-flex items-center px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition whitespace-nowrap"
                       >
                         Credentials
                       </button>
                       <button
-                        onClick={() => setDeleteConfirmTarget({ id: h.id, name: h.name })}
+                        onClick={() => setDeleteConfirmTarget({ id, name: h.name })}
                         className="inline-flex items-center px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50 transition whitespace-nowrap"
                       >
                         Delete
@@ -1282,7 +1290,7 @@ export default function Hotels() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
