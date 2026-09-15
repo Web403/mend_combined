@@ -8,18 +8,39 @@ function cleanParams(params = {}) {
   )
 }
 
+/**
+ * List hotels (tenants).
+ * Backend: GET /hotel/admin/Hotels
+ * Auth: SUPER_ADMIN
+ * Response data: { data: Hotel[], pagination }
+ */
 export async function getHotels(params = {}) {
   const cleaned = cleanParams(params)
-  const res = await api.get(ADMIN_HOTELS_PATH, { params: cleaned })
-  const d = res.data
+  // Booleans must be sent as strings for Express query parsing
+  if (typeof cleaned.isActive === "boolean") cleaned.isActive = String(cleaned.isActive)
+  if (typeof cleaned.initialPaymentDone === "boolean") {
+    cleaned.initialPaymentDone = String(cleaned.initialPaymentDone)
+  }
 
-  // Response: { success, message, data: { data: [...], pagination? } }
-  const list = d.data?.data ?? d.data ?? []
-  const pagination = d.data?.pagination ?? {
+  const res = await api.get(ADMIN_HOTELS_PATH, { params: cleaned })
+  const body = res.data ?? {}
+  const payload = body.data
+
+  let list = []
+  let pagination = null
+
+  if (Array.isArray(payload)) {
+    list = payload
+  } else if (payload && typeof payload === "object") {
+    list = payload.data ?? payload.hotels ?? payload.items ?? []
+    pagination = payload.pagination ?? null
+  }
+
+  pagination = pagination ?? body.meta ?? {
     total: list.length,
-    page: params.page ?? 1,
-    limit: params.limit ?? 25,
-    totalPages: Math.ceil(list.length / (params.limit ?? 25)),
+    page: Number(cleaned.page) || 1,
+    limit: Number(cleaned.limit) || 25,
+    totalPages: Math.ceil(list.length / (Number(cleaned.limit) || 25)) || 1,
   }
 
   return { hotels: list, pagination }
@@ -46,7 +67,7 @@ export async function deleteHotel(hotelId) {
 }
 
 export async function updateHotelStatus(hotelId, isActive) {
-  const res = await api.patch(`${ADMIN_HOTELS_PATH}/${hotelId}/status`, { isActive })
+  const res = await api.patch(`${ADMIN_HOTELS_PATH}/${hotelId}/status`, { isActive: Boolean(isActive) })
   return res.data?.data ?? null
 }
 
@@ -78,4 +99,10 @@ export async function bulkUploadHotelUsers(hotelId, file) {
 export async function promoteHotelUser(hotelId, userId, payload) {
   const res = await api.patch(`${ADMIN_HOTELS_PATH}/${hotelId}/users/${userId}/promote`, payload)
   return res.data
+}
+
+/** Resolve the best hotel identifier for API path params (string id preferred). */
+export function hotelKey(hotel) {
+  if (!hotel) return ""
+  return hotel.id || hotel._id || ""
 }

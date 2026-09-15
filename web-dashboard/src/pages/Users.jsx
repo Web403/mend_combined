@@ -1,18 +1,28 @@
 import { useState, useEffect, useCallback } from "react"
-import { getUserProfile, getUsers } from "../api/users"
-import { getHotels } from "../api/hotels"
+import { deleteUser, getUserProfile, getUsers, suspendUser, updateUser } from "../api/users"
+import { getHotels, hotelKey } from "../api/hotels"
 import { sendCredentials } from "../api/credentials"
+import { getErrorMessage } from "../api/api"
 import ConfirmModal from "../components/ConfirmModal"
 
-const STATUS_OPTIONS = ["ACTIVE", "INACTIVE", "PENDING"]
-const EXP_OPTIONS = ["0–1 years", "1–3 years", "3–5 years", "5–10 years", "10+ years"]
+const STATUS_OPTIONS = ["CREATED", "ACTIVE", "SUSPENDED"]
+const EXP_OPTIONS = [
+  "Less than 1 year",
+  "1–2 years",
+  "3–5 years",
+  "5–10 years",
+  "10+ years",
+]
 const AVAIL_OPTIONS = [
-  "Flexible / Any time", "Weekends only", "Weekdays only",
-  "Evenings only", "Part-time", "Full-time",
+  "Weekdays",
+  "Weekends",
+  "Both weekdays & weekends",
+  "Flexible / Any time",
 ]
 const PROFESSION_OPTIONS = [
-  "Bartender", "Chef", "Waiter", "Host / Hostess", "DJ", "Event Manager", "Security",
+  "Captain", "Chef", "Waiter", "Bartender", "Hostess", "Management", "Student", "Other",
 ]
+const ROLE_OPTIONS = ["ADMIN", "MANAGER", "EMPLOYEE", "HR", "STUDENT", "PROFESSIONAL"]
 const AVATAR_PALETTES = [
   "bg-blue-100 text-blue-700", "bg-emerald-100 text-emerald-700",
   "bg-pink-100 text-pink-700", "bg-violet-100 text-violet-700",
@@ -116,6 +126,12 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState("")
+  const [suspendTarget, setSuspendTarget] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [editRole, setEditRole] = useState("")
+  const [editStatus, setEditStatus] = useState("")
+  const [savingUser, setSavingUser] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchInput); setPage(1) }, 400)
@@ -148,7 +164,7 @@ export default function Users() {
       setUsers(result.users)
       setPagination(result.pagination)
     } catch (e) {
-      setError(e?.response?.data?.message || "Failed to load users.")
+      setError(getErrorMessage(e, "Failed to load users."))
     } finally {
       setLoading(false)
     }
@@ -163,8 +179,10 @@ export default function Users() {
     try {
       const profile = await getUserProfile(userId)
       setSelectedUser(profile)
+      setEditRole(profile?.role || "")
+      setEditStatus(profile?.status || "")
     } catch (e) {
-      setDetailError(e?.response?.data?.message || "Failed to load user profile.")
+      setDetailError(getErrorMessage(e, "Failed to load user profile."))
     } finally {
       setDetailLoading(false)
     }
@@ -201,9 +219,71 @@ export default function Users() {
       showToast("success", `Credentials sent to ${confirmTarget.name}`)
     } catch (e) {
       setConfirmTarget(null)
-      showToast("error", e?.response?.data?.message || "Failed to send credentials.")
+      showToast("error", getErrorMessage(e, "Failed to send credentials."))
     } finally {
       setSending(false)
+    }
+  }
+
+  async function handleSuspend() {
+    if (!suspendTarget) return
+    setActionLoading(true)
+    try {
+      const updated = await suspendUser(suspendTarget.id)
+      setUsers((items) =>
+        items.map((u) => (getUserId(u) === suspendTarget.id ? { ...u, ...updated, status: updated?.status || "SUSPENDED" } : u))
+      )
+      if (selectedUserId === suspendTarget.id) {
+        setSelectedUser((cur) => (cur ? { ...cur, ...updated, status: updated?.status || "SUSPENDED" } : cur))
+        setEditStatus(updated?.status || "SUSPENDED")
+      }
+      setSuspendTarget(null)
+      showToast("success", "User suspended successfully")
+    } catch (e) {
+      showToast("error", getErrorMessage(e, "Failed to suspend user. Requires MENDADMIN."))
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  async function handleDeleteUser() {
+    if (!deleteTarget) return
+    setActionLoading(true)
+    try {
+      await deleteUser(deleteTarget.id)
+      setUsers((items) => items.filter((u) => getUserId(u) !== deleteTarget.id))
+      setPagination((p) => ({ ...p, total: Math.max(0, (p.total || 0) - 1) }))
+      if (selectedUserId === deleteTarget.id) {
+        setSelectedUserId(null)
+        setSelectedUser(null)
+      }
+      setDeleteTarget(null)
+      showToast("success", "User deleted successfully")
+      fetchUsers()
+    } catch (e) {
+      showToast("error", getErrorMessage(e, "Failed to delete user. Requires MENDADMIN."))
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  async function handleSaveUserAdmin() {
+    if (!selectedUser) return
+    setSavingUser(true)
+    try {
+      const payload = {}
+      if (editRole) payload.role = editRole
+      if (editStatus) payload.status = editStatus
+      const updated = await updateUser(getUserId(selectedUser), payload)
+      setSelectedUser((cur) => ({ ...cur, ...updated }))
+      setUsers((items) =>
+        items.map((u) => (getUserId(u) === getUserId(selectedUser) ? { ...u, ...updated } : u))
+      )
+      showToast("success", "User updated successfully")
+    } catch (e) {
+      showToast("error", getErrorMessage(e, "Failed to update user. Requires MENDADMIN."))
+    } finally {
+      setSavingUser(false)
     }
   }
 
@@ -231,11 +311,45 @@ export default function Users() {
         onConfirm={handleSendCredentials}
         onCancel={() => !sending && setConfirmTarget(null)}
       />
+      <ConfirmModal
+        open={!!suspendTarget}
+        danger
+        title="Suspend user"
+        description={`Suspend "${suspendTarget?.name}"? They will lose access until reactivated by an administrator.`}
+        confirmLabel="Suspend user"
+        loading={actionLoading}
+        onConfirm={handleSuspend}
+        onCancel={() => !actionLoading && setSuspendTarget(null)}
+      />
+      <ConfirmModal
+        open={!!deleteTarget}
+        danger
+        title="Delete user"
+        description={`Permanently delete "${deleteTarget?.name}"? This cannot be undone.`}
+        confirmLabel="Delete user"
+        loading={actionLoading}
+        onConfirm={handleDeleteUser}
+        onCancel={() => !actionLoading && setDeleteTarget(null)}
+      />
       <UserDrawer
         open={!!selectedUserId}
         user={selectedUser}
         loading={detailLoading}
         error={detailError}
+        editRole={editRole}
+        editStatus={editStatus}
+        savingUser={savingUser}
+        onEditRole={setEditRole}
+        onEditStatus={setEditStatus}
+        onSaveUser={handleSaveUserAdmin}
+        onSuspend={() =>
+          selectedUser &&
+          setSuspendTarget({ id: getUserId(selectedUser), name: getFullName(selectedUser) })
+        }
+        onDelete={() =>
+          selectedUser &&
+          setDeleteTarget({ id: getUserId(selectedUser), name: getFullName(selectedUser) })
+        }
         onClose={() => setSelectedUserId(null)}
         onRetry={() => loadUserDetails(selectedUserId)}
       />
@@ -280,7 +394,9 @@ export default function Users() {
         <select className={SEL} value={hotelId} onChange={(e) => { setHotelId(e.target.value); setPage(1) }}>
           <option value="">{hotelsLoading ? "Loading hotels..." : "All hotels"}</option>
           {hotelOptions.map((hotel) => (
-            <option key={hotel.id} value={hotel.id}>{hotel.name || hotel.email || hotel.id}</option>
+            <option key={hotelKey(hotel)} value={hotelKey(hotel)}>
+              {hotel.name || hotel.email || hotelKey(hotel)}
+            </option>
           ))}
         </select>
         {hasFilters && (
@@ -421,7 +537,22 @@ function DetailRow({ label, value }) {
   )
 }
 
-function UserDrawer({ open, user, loading, error, onClose, onRetry }) {
+function UserDrawer({
+  open,
+  user,
+  loading,
+  error,
+  editRole,
+  editStatus,
+  savingUser,
+  onEditRole,
+  onEditStatus,
+  onSaveUser,
+  onSuspend,
+  onDelete,
+  onClose,
+  onRetry,
+}) {
   if (!open) return null
 
   const profile = user?.profile ?? {}
@@ -439,6 +570,11 @@ function UserDrawer({ open, user, loading, error, onClose, onRetry }) {
             <h2 className="text-xl font-bold text-slate-900 mt-1">{user ? getFullName(user) : "Loading user..."}</h2>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               {user?.status ? <StatusBadge status={user.status} /> : null}
+              {user?.role ? (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 ring-1 ring-violet-200">
+                  {user.role}
+                </span>
+              ) : null}
               {user ? <PaymentBadge paid={user.initialPaymentDone} /> : null}
               {user?.profession ? (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 ring-1 ring-slate-200">
@@ -476,16 +612,81 @@ function UserDrawer({ open, user, loading, error, onClose, onRetry }) {
           {!loading && user && (
             <div className="space-y-5">
               <section className="bg-white border border-slate-200 rounded-xl p-5">
+                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                  <h3 className="text-sm font-bold text-slate-900">Administrative actions</h3>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={onSuspend}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    >
+                      Suspend
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onDelete}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                  <label className="text-xs font-semibold text-slate-500">
+                    Role
+                    <select
+                      className="mt-1 w-full text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white"
+                      value={editRole}
+                      onChange={(e) => onEditRole(e.target.value)}
+                    >
+                      <option value="">—</option>
+                      {ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-slate-500">
+                    Status
+                    <select
+                      className="mt-1 w-full text-sm px-3 py-2 border border-slate-200 rounded-lg bg-white"
+                      value={editStatus}
+                      onChange={(e) => onEditStatus(e.target.value)}
+                    >
+                      <option value="">—</option>
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={onSaveUser}
+                    disabled={savingUser}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#1A2F5E] text-white hover:bg-[#152549] disabled:opacity-60"
+                  >
+                    {savingUser ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-3">
+                  Updates call PUT /user/admin/users/:id (MENDADMIN). Backend remains the authority for authorization.
+                </p>
+              </section>
+
+              <section className="bg-white border border-slate-200 rounded-xl p-5">
                 <h3 className="text-sm font-bold text-slate-900 mb-4">Basic information</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <DetailRow label="First name" value={profile.firstName} />
                   <DetailRow label="Last name" value={profile.lastName} />
                   <DetailRow label="Email" value={user.email} />
-                  <DetailRow label="Phone" value={user.phoneNumber ?? profile.phoneNumber} />
+                  <DetailRow label="Phone" value={user.phone ?? user.phoneNumber ?? profile.phoneNumber} />
+                  <DetailRow label="Role" value={user.role} />
+                  <DetailRow label="Department type" value={user.departmentType} />
+                  <DetailRow label="Department role" value={user.departmentRole} />
                   <DetailRow label="Profession" value={user.profession} />
                   <DetailRow label="Experience" value={user.yearsOfExperience} />
                   <DetailRow label="Availability" value={user.availability} />
                   <DetailRow label="Status" value={user.status} />
+                  <DetailRow label="Hotel ID" value={user.hotelId} />
                   <DetailRow label="Initial payment" value={user.initialPaymentDone ? "Done" : "Pending"} />
                   <DetailRow label="Payment id" value={user.paymentId} />
                   <DetailRow label="Joined" value={formatDate(user.createdAt)} />

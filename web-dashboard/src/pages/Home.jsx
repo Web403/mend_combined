@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import { getAdminAnalyticsSummary } from "../api/analytics"
+import { getErrorMessage } from "../api/api"
 
 const METRICS = [
   {
@@ -305,7 +307,7 @@ export default function Home() {
       setSummary(data)
       setLastUpdated(new Date())
     } catch (e) {
-      setError(e?.response?.data?.message || "Failed to load analytics summary.")
+      setError(getErrorMessage(e, "Failed to load analytics summary."))
     } finally {
       setLoading(false)
     }
@@ -410,6 +412,28 @@ export default function Home() {
         {loading
           ? METRICS.map((m) => <SkeletonCard key={m.key} />)
           : cards.map((stat) => <MetricCard key={stat.key} stat={stat} />)}
+      </div>
+
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { to: "/dashboard/hotels", title: "Hotels", desc: "Tenant directory, subscriptions, onboarding" },
+          { to: "/dashboard/users", title: "Users", desc: "Platform user directory and account actions" },
+          { to: "/dashboard/analytics", title: "Analytics", desc: "Platform summary and CSV export" },
+          { to: "/dashboard/compliance", title: "Compliance", desc: "Certification tiers across hotels" },
+          { to: "/dashboard/rbac", title: "Access control", desc: "Hotel-scoped RBAC permission rules" },
+          { to: "/dashboard/lms/courses", title: "LMS courses", desc: "Catalog, content, and publish state" },
+          { to: "/dashboard/lms/categories", title: "LMS categories", desc: "Organize the learning catalog" },
+          { to: "/dashboard/lms/enrollments", title: "Enrollments", desc: "Review and approve course access" },
+        ].map((item) => (
+          <Link
+            key={item.to}
+            to={item.to}
+            className="block bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition no-underline"
+          >
+            <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">{item.desc}</p>
+          </Link>
+        ))}
       </div>
     </div>
   )
