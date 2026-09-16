@@ -87,8 +87,11 @@ export const deleteLmsQuestion = (id) => api.delete(`/lms/assessments/questions/
 
 export async function getCourseEnrollments(courseId, params = {}) {
   const data = unwrap(await api.get(`/lms/courses/${courseId}/enrollments`, { params: clean(params) }))
-  const items = Array.isArray(data) ? data : data?.items ?? data?.data ?? []
-  return { items, pagination: data?.pagination ?? { total: items.length } }
+  // Documented frontend-integration fix: the LMS enrollment controller returns
+  // { enrollments, total } (see backend enrollment.service.getCourseEnrollments);
+  // the previous shape-mapping only knew `items`/`data`, so the list always rendered empty.
+  const items = Array.isArray(data) ? data : data?.enrollments ?? data?.items ?? data?.data ?? []
+  return { items, pagination: data?.pagination ?? { total: data?.total ?? items.length } }
 }
 
 export const approveEnrollment = (id) => api.patch(`/lms/enrollments/${id}/approve`).then(unwrap)
