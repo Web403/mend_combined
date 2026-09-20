@@ -349,6 +349,22 @@ an endpoint or a field.
 
 ## 6. Observations / deliberate non-changes
 
+* **No person-level rating aggregate was added, deliberately.** §22 asks whether
+  the application computes employee / manager / student ratings. It does not —
+  and the codebase already has an authoritative mechanism for rating a worker on
+  a gig: `Booking.rating` (1–5, written by
+  `PATCH /gigs/bookings/:id/rate`, one rating per booking, guarded by
+  `BookingService.rateBooking`). `Application.rating` plays the same role
+  post-hire. Adding a second, review-derived worker score would create two
+  competing numbers for the same concept, so the existing semantics are
+  preserved: `HR_TO_STUDENT` reviews carry qualitative feedback and are readable
+  through `get-user-received-reviews`, while the numeric worker rating stays on
+  the booking.
+  The only rating aggregations that exist anywhere are unrelated to reviews —
+  wellbeing scores (`compliance.service.ts`), task durations
+  (`task.repository.ts`) and OPH (`analytics.repository.ts`). The hotel summary
+  added here is therefore the first review-derived aggregate in the system, and
+  it is computed on read rather than stored.
 * **`GET /get-hotels-with-reviews` is a global browse endpoint** — it returns
   reviews for all hotels to any authenticated user. That is pre-existing
   behaviour and appears intentional (hotel discovery). It was left untouched to
