@@ -3,7 +3,7 @@ import { UserAvailability, UserProfession, UserStatus, UserRole, YearsOfExperien
 import { MonthlyEvents, PrimaryPainPoint, PropertyType } from "./hotel"
 import { ShiftStatus } from "./shift"
 import { JobStatus, JobDepartment, EmploymentType, ApplicationStatus, CertificationLevel, GigStatus, BookingStatus, RateUnit } from "./recruitment"
-import { ReviewType } from "./review"
+import { ReviewType, ReviewRelationship, RevieweeRef } from "./review"
 
 export {
   IdType, SortOrder, UserAvailability, UserProfession, UserStatus, UserRole,
@@ -11,5 +11,5 @@ export {
   RegistrationType, ShiftStatus,
   JobStatus, JobDepartment, EmploymentType, ApplicationStatus, CertificationLevel,
   GigStatus, BookingStatus, RateUnit,
-  ReviewType
+  ReviewType, ReviewRelationship, RevieweeRef
 }
