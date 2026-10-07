@@ -4,7 +4,12 @@ export enum UserRole {
     EMPLOYEE = 'EMPLOYEE',
     STUDENT = 'STUDENT',
     PROFESSIONAL = 'PROFESSIONAL',
-    HR = "HR"
+    HR = "HR",
+    /** Business-side gig accounts; these roles are limited to gig workflows. */
+    CATERER = "CATERER",
+    EVENT_MANAGER = "EVENT_MANAGER",
+    /** Standalone gig-worker account (STUDENT/PROFESSIONAL remain supported). */
+    FREELANCER = "FREELANCER"
 }
 
 export enum UserStatus {

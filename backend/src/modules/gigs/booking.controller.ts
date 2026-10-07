@@ -9,6 +9,7 @@ import { BookingService } from "./booking.service";
 import { successResponse, errorResponse } from "../../core/utils/ApiResponse";
 import { AuthenticatedRequest } from "../../core/middleware/auth.middleware";
 import { BookingStatus } from "../../shared/enums/recruitment";
+import { getGigOrganizerHotelId, isGigHotelAccount } from "./gig.middleware";
 import type {
   BookingListOptions,
   BookingListFilters,
@@ -20,20 +21,6 @@ const qs = (v: unknown): string | undefined => (typeof v === "string" ? v : unde
 const service = new BookingService();
 
 export class BookingController {
-  // ── POST /gigs/:id/book ──────────────────────────────────────────────────────
-
-  async bookGig(req: AuthenticatedRequest, res: Response): Promise<void> {
-    try {
-      const workerId = req.user?.id as string;
-      const gigId    = req.params["id"] as string;
-
-      const booking = await service.bookGig(workerId, gigId);
-      res.status(201).json(successResponse(booking, "Gig booked successfully"));
-    } catch (error: any) {
-      res.status(error.statusCode ?? 400).json(errorResponse(error.message));
-    }
-  }
-
   // ── PATCH /bookings/:id/cancel ───────────────────────────────────────────────
 
   async cancelBooking(req: AuthenticatedRequest, res: Response): Promise<void> {
@@ -52,10 +39,16 @@ export class BookingController {
 
   async completeBooking(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const reviewerId = req.hotelId as string;
+      const reviewerId = req.user?.id as string;
+      const hotelId = req.hotelId as string;
       const bookingId  = req.params["id"] as string;
 
-      const booking = await service.completeBooking(reviewerId, bookingId);
+      const booking = await service.completeBooking(
+        reviewerId,
+        hotelId,
+        bookingId,
+        isGigHotelAccount(req),
+      );
       res.json(successResponse(booking, "Booking marked as completed"));
     } catch (error: any) {
       res.status(error.statusCode ?? 400).json(errorResponse(error.message));
@@ -66,10 +59,16 @@ export class BookingController {
 
   async noShowBooking(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const reviewerId = req.hotelId as string;
+      const reviewerId = req.user?.id as string;
+      const hotelId = req.hotelId as string;
       const bookingId  = req.params["id"] as string;
 
-      const booking = await service.noShowBooking(reviewerId, bookingId);
+      const booking = await service.noShowBooking(
+        reviewerId,
+        hotelId,
+        bookingId,
+        isGigHotelAccount(req),
+      );
       res.json(successResponse(booking, "Booking marked as no-show"));
     } catch (error: any) {
       res.status(error.statusCode ?? 400).json(errorResponse(error.message));
@@ -80,12 +79,35 @@ export class BookingController {
 
   async rateBooking(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const reviewerId = req.hotelId as string;
+      const reviewerId = req.user?.id as string;
+      const hotelId = req.hotelId as string;
       const bookingId  = req.params["id"] as string;
-      const { rating } = req.body as { rating: number };
+      const { rating, review } = req.body as { rating: number; review?: string };
 
-      const booking = await service.rateBooking(reviewerId, bookingId, rating);
+      const booking = await service.rateBooking(
+        reviewerId,
+        hotelId,
+        bookingId,
+        rating,
+        review,
+        isGigHotelAccount(req),
+      );
       res.json(successResponse(booking, "Booking rated successfully"));
+    } catch (error: any) {
+      res.status(error.statusCode ?? 400).json(errorResponse(error.message));
+    }
+  }
+
+  // ── PATCH /bookings/:id/rate-organizer ────────────────────────────────────────
+
+  async rateOrganizer(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const workerId = req.user?.id as string;
+      const bookingId = req.params["id"] as string;
+      const { rating, review } = req.body as { rating: number; review?: string };
+
+      const booking = await service.rateOrganizer(workerId, bookingId, rating, review);
+      res.json(successResponse(booking, "Caterer rated successfully."));
     } catch (error: any) {
       res.status(error.statusCode ?? 400).json(errorResponse(error.message));
     }
@@ -95,6 +117,7 @@ export class BookingController {
 
   async getBookingsForGig(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const actorId = String(req.user?.id ?? "");
       const hotelId = req.hotelId as string;
       const gigId   = req.params["id"] as string;
       const page    = parseInt(qs(req.query.page)  ?? "1",  10);
@@ -102,7 +125,13 @@ export class BookingController {
 
       const options: BookingListOptions = { page, limit };
 
-      const result = await service.getBookingsForGig(hotelId, gigId, options);
+      const result = await service.getBookingsForGig(
+        actorId,
+        hotelId,
+        gigId,
+        isGigHotelAccount(req),
+        options,
+      );
       res.json(successResponse(result.bookings, "Bookings retrieved successfully", result.pagination as any));
     } catch (error: any) {
       res.status(error.statusCode ?? 400).json(errorResponse(error.message));
@@ -138,10 +167,15 @@ export class BookingController {
   async getBookingById(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const bookingId  = req.params["id"] as string;
-      const isHotel    = !!req.hotelId;
-      const requesterId = isHotel ? (req.hotelId as string) : (req.user?.id as string);
+      const requesterId = String(req.user?.id ?? "");
+      const requesterHotelId = getGigOrganizerHotelId(req);
 
-      const booking = await service.getBookingById(bookingId, requesterId, isHotel);
+      const booking = await service.getBookingById(
+        bookingId,
+        requesterId,
+        requesterHotelId,
+        isGigHotelAccount(req),
+      );
       res.json(successResponse(booking, "Booking retrieved successfully"));
     } catch (error: any) {
       res.status(error.statusCode ?? 400).json(errorResponse(error.message));

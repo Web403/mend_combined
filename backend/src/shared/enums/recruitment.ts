@@ -59,6 +59,14 @@ export enum BookingStatus {
   NO_SHOW   = "NO_SHOW",
 }
 
+/** Lifecycle for a freelancer's application to a short-term gig. */
+export enum GigApplicationStatus {
+  APPLIED = "APPLIED",
+  APPROVED = "APPROVED",
+  REJECTED = "REJECTED",
+  WITHDRAWN = "WITHDRAWN",
+}
+
 export enum RateUnit {
   HOURLY = "HOURLY",
   DAILY  = "DAILY",
