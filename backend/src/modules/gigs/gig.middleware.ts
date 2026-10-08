@@ -4,10 +4,9 @@ import { AuthRole } from "../../shared/enums/common";
 import { UserRole } from "../../shared/enums/user";
 
 const ORGANIZER_ROLES = [
-  AuthRole.HOTEL, // Existing caterer / business account
-  UserRole.CATERER,
-  UserRole.EVENT_MANAGER,
-  UserRole.MANAGER, // Existing event-manager accounts remain compatible
+  AuthRole.HOTEL, // Existing hotel / business account
+  UserRole.CATERER_EVENT_MANAGER,
+  UserRole.MANAGER, // Existing manager accounts remain compatible
 ];
 
 export function isGigOrganizerRole(roles: string[] = []): boolean {
@@ -28,7 +27,7 @@ export const gigOrganizerMiddleware = (
   if (!req.user || !isGigOrganizerRole(roles)) {
     res.status(403).json({
       success: false,
-      message: "Only caterers and event managers can manage gigs.",
+      message: "Only caterer/event-manager accounts can manage gigs.",
     });
     return;
   }

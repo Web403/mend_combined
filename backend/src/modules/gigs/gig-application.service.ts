@@ -17,11 +17,7 @@ import { GigApplicationRepository } from "./gig-application.repository";
 import { GigFreelancerPreferenceRepository } from "./gig-freelancer-preference.repository";
 import { GigRepository } from "./gig.repository";
 
-const GIG_WORKER_ROLES = [
-  UserRole.FREELANCER,
-  UserRole.STUDENT,
-  UserRole.PROFESSIONAL,
-];
+const GIG_WORKER_ROLES = [UserRole.STUDENT, UserRole.PROFESSIONAL];
 
 export interface GigApplicationServiceDependencies {
   gigRepo: Pick<GigRepository, "findById" | "findByIdAndHotel" | "reserveSlot" | "releaseSlot" | "update">;

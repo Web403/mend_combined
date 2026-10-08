@@ -197,7 +197,7 @@ function makeWorld() {
     preferenceRepo,
     bookingRepo,
     findApplicant: async (id) => ({
-      role: applicantRoles.get(id) ?? UserRole.FREELANCER,
+      role: applicantRoles.get(id) ?? UserRole.STUDENT,
       status: "ACTIVE",
     }),
   });
