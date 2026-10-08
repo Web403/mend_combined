@@ -4,7 +4,9 @@ export enum UserRole {
     EMPLOYEE = 'EMPLOYEE',
     STUDENT = 'STUDENT',
     PROFESSIONAL = 'PROFESSIONAL',
-    HR = "HR"
+    HR = "HR",
+    /** Unified business-side account for caterers and event managers. */
+    CATERER_EVENT_MANAGER = "CATERER_EVENT_MANAGER"
 }
 
 export enum UserStatus {

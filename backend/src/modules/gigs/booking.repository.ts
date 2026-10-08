@@ -43,6 +43,30 @@ export class BookingRepository {
     return BookingModel.findOne({ id }).lean();
   }
 
+  async findByApplicationId(applicationId: string): Promise<IBooking | null> {
+    return BookingModel.findOne({ applicationId }).lean();
+  }
+
+  async deleteByApplicationId(applicationId: string): Promise<void> {
+    await BookingModel.deleteOne({ applicationId });
+  }
+
+  /** Legacy completed bookings are not gated; only new completions opt in. */
+  async hasOutstandingWorkerRating(workerId: string): Promise<boolean> {
+    const booking = await BookingModel.findOne({
+      workerId,
+      status: BookingStatus.COMPLETED,
+      workerRatingRequired: true,
+      $or: [
+        { workerRating: { $exists: false } },
+        { workerRating: null },
+      ],
+    })
+      .select("_id")
+      .lean();
+    return Boolean(booking);
+  }
+
   /**
    * Find an existing booking by gigId + workerId for duplicate-booking check.
    * Requirement 8.4

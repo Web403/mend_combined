@@ -47,6 +47,32 @@ export class GigRepository {
   }
 
   /**
+   * Atomically claims one remaining slot for an approved application. Filtering
+   * against the current capacity prevents concurrent approvals from overfilling
+   * a gig.
+   */
+  async reserveSlot(gigId: string, capacity: number): Promise<IGig | null> {
+    return GigModel.findOneAndUpdate(
+      {
+        id: gigId,
+        status: GigStatus.OPEN,
+        filledSlots: { $lt: capacity },
+      },
+      { $inc: { filledSlots: 1 } },
+      { new: true },
+    ).lean();
+  }
+
+  /** Compensating write when an approval cannot finish after reserving a slot. */
+  async releaseSlot(gigId: string): Promise<IGig | null> {
+    return GigModel.findOneAndUpdate(
+      { id: gigId, filledSlots: { $gt: 0 } },
+      { $inc: { filledSlots: -1 } },
+      { new: true },
+    ).lean();
+  }
+
+  /**
    * Bulk-cancels all OPEN and DRAFT gigs for a hotel with a block reason.
    * Requirement 14.1
    */

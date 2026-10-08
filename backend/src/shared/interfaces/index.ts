@@ -12,7 +12,7 @@ import { IShift } from "./shift"
 import { IHotel } from "./hotel"
 import { ICourse, ILecture, IEnrollment, IAssessment, IAssessmentAttempt, ICertificate } from "./lms.d";
 import { IRoster } from "./roster";
-import { IGig, IBooking } from "./gigs.d";
+import { IGig, IBooking, IGigApplication, IGigFreelancerPreference } from "./gigs.d";
 import {IStorageProvider} from "./storage"
 import { IReview, ReviewActor, CreateReviewInput, ResolvedReviewContext, ReviewListOptions, ReviewListFilters, HotelRatingSummary, HotelRatingSummaryBucket } from "./review"
 
@@ -22,7 +22,7 @@ export {
   ISOS, ITask, IUser, IWellbeing, IBaseDocument, IShift, IHotel,
   ICourse, ILecture, IEnrollment, IAssessment, IAssessmentAttempt, ICertificate,
   IRoster,
-  IGig, IBooking,
+  IGig, IBooking, IGigApplication, IGigFreelancerPreference,
   IStorageProvider,
   IReview, ReviewActor, CreateReviewInput, ResolvedReviewContext,
   ReviewListOptions, ReviewListFilters, HotelRatingSummary, HotelRatingSummaryBucket

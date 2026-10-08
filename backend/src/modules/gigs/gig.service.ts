@@ -31,42 +31,6 @@ import type {
   GigResponseDto,
   GigListOptions,
 } from "../../shared/interfaces/gigs.d";
-import { extractHours } from "../../core/utils/pattern.helper";
-
-// ── Unsafe shift pattern detection (reused from recruitment module, FR60) ─────
-
-function detectUnsafeShiftPattern(
-  shiftPolicy: string,
-  recoveryPolicy: string,
-): string | null {
-  // Other unsafe patterns
-  const unsafePatterns = [
-    /no\s+break/i,
-    /24\s*\/\s*7/i,
-    /split\s+shift.*no\s+gap/i,
-    /no\s+rest/i,
-  ];
-
-  for (const pattern of unsafePatterns) {
-    if (pattern.test(shiftPolicy) || pattern.test(recoveryPolicy)) {
-      return "Unsafe shift or recovery policy detected.";
-    }
-  }
-
-  // Validate shift duration
-  const shiftHours = extractHours(shiftPolicy);
-  if (shiftHours !== null && shiftHours > 10) {
-    return `Shift duration is ${shiftHours} hours. Maximum allowed is 10 hours.`;
-  }
-
-  // Validate recovery duration
-  const recoveryHours = extractHours(recoveryPolicy);
-  if (recoveryHours !== null && recoveryHours < 14) {
-    return `Recovery period is ${recoveryHours} hours. Minimum required is 14 hours.`;
-  }
-
-  return null;
-}
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
@@ -113,15 +77,6 @@ export class GigService {
 
     // Validate fields
     this.validateCreateDto(dto);
-
-    // Requirement 3.9 — compliance engine shift/recovery check
-    if (dto.shiftPolicy && dto.recoveryPolicy) {
-      const unsafeReason = detectUnsafeShiftPattern(
-        dto.shiftPolicy,
-        dto.recoveryPolicy,
-      );
-      if (unsafeReason) throw new AppError(unsafeReason, 422);
-    }
 
     const gig = await this.gigRepo.create({
       id: `GIG_${nanoid(10)}`,

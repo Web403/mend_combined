@@ -1,5 +1,5 @@
 import { IBaseDocument } from "../../shared/interfaces/base.types";
-import { UserRole } from "../../shared/constants";
+import { UserRole } from "../enums/user";
 import {
   IdType,
   UserAvailability,
