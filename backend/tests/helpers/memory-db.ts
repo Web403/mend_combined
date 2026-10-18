@@ -489,6 +489,41 @@ export class MemoryModel {
     }
   }
 
+  /**
+   * Mirrors `Model.findOneAndUpdate(filter, { $set, $unset }, { new: true })`.
+   * Returns a thenable with `.lean()`, like the Mongoose query it stands in for.
+   */
+  findOneAndUpdate(filter: Doc = {}, update: Doc = {}, options: { new?: boolean } = {}) {
+    return new MemoryUpdateQuery(() => {
+      const doc = this.docs.find((candidate) => matches(candidate, filter));
+      if (!doc) return null;
+      for (const [key, value] of Object.entries(update.$set ?? {})) {
+        if (value !== undefined) doc[key] = value;
+      }
+      for (const key of Object.keys(update.$unset ?? {})) {
+        delete doc[key];
+      }
+      if (this.options.timestamps) doc.updatedAt = new Date();
+      return { ...doc };
+    }, options);
+  }
+
+  async deleteOne(filter: Doc = {}): Promise<{ deletedCount: number }> {
+    const index = this.docs.findIndex((doc) => matches(doc, filter));
+    if (index === -1) return { deletedCount: 0 };
+    this.docs.splice(index, 1);
+    return { deletedCount: 1 };
+  }
+
+  /** Mirrors `Model.insertMany(docs)`. Each doc goes through create-time checks. */
+  async insertMany(data: Doc[]): Promise<Doc[]> {
+    const created: Doc[] = [];
+    for (const input of data) {
+      created.push(await this.create(input));
+    }
+    return created;
+  }
+
   reset() {
     this.docs.length = 0;
   }
@@ -498,6 +533,26 @@ export class MemoryModel {
     if (!doc._id) doc._id = new mongoose.Types.ObjectId();
     this.docs.push(doc);
     return doc;
+  }
+}
+
+class MemoryUpdateQuery implements PromiseLike<any> {
+  constructor(
+    private readonly apply: () => Doc | null,
+    private readonly options: { new?: boolean } = {},
+  ) {}
+
+  lean() {
+    return this;
+  }
+
+  then<TResult1 = any, TResult2 = never>(
+    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2> {
+    return Promise.resolve()
+      .then(() => this.apply())
+      .then(onfulfilled, onrejected);
   }
 }
 
