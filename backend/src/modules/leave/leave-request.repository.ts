@@ -27,8 +27,17 @@ export interface OverlapQuery {
   excludeId?: string;
 }
 
+export interface LiveRangeQuery {
+  hotelId: string;
+  userIds: string[];
+  from: Date;
+  to: Date;
+}
+
 export interface LeaveRequestRepository {
   create(data: Partial<ILeaveRequest>): Promise<ILeaveRequest>;
+  /** Live (PENDING or APPROVED) requests of several employees touching [from, to]. Used for roster warnings. */
+  findLiveInRangeForUsers(query: LiveRangeQuery): Promise<ILeaveRequest[]>;
   findByIdInHotel(hotelId: string, id: string): Promise<ILeaveRequest | null>;
   findOverlapping(query: OverlapQuery): Promise<ILeaveRequest[]>;
   findPage(
@@ -54,6 +63,19 @@ export const leaveRequestRepository: LeaveRequestRepository = {
 
   async findByIdInHotel(hotelId, id) {
     return LeaveRequestModel.findOne({ _id: id, hotelId }).lean<ILeaveRequest>();
+  },
+
+  async findLiveInRangeForUsers({ hotelId, userIds, from, to }) {
+    if (userIds.length === 0) return [];
+    return LeaveRequestModel.find({
+      hotelId,
+      userId: { $in: userIds.map((id) => new Types.ObjectId(id)) },
+      status: { $in: [...LIVE_LEAVE_STATUSES] },
+      fromDate: { $lte: to },
+      toDate: { $gte: from },
+    })
+      .sort({ fromDate: 1, _id: 1 })
+      .lean<ILeaveRequest[]>();
   },
 
   async findOverlapping({ hotelId, userId, from, to, statuses = LIVE_LEAVE_STATUSES, excludeId }) {

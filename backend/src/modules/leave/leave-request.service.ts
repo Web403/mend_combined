@@ -9,6 +9,8 @@
 //   APPROVED ──cancel (only if the leave has not started yet)──▶ CANCELLED
 //
 // Invariants:
+//   0. Nothing is backdated. A request cannot start before today, and a pending
+//      request whose start date has passed cannot be approved (reject it instead).
 //   1. An employee never has two live (PENDING or APPROVED) requests whose dates
 //      overlap. Enforced on submit and re-checked on approve, so concurrent
 //      submissions and approvals cannot both win.
@@ -16,6 +18,7 @@
 //      range minus the employee's offs, and a range that is entirely offs is rejected.
 //   3. Nobody reviews their own request.
 //   4. Every status change is a conditional update from the status that was read.
+//   5. Approval takes the employee off every roster in the leave's date range.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Types } from "mongoose";
@@ -23,6 +26,7 @@ import { ILeaveRequest, LeaveRequestDto } from "../../shared/interfaces/leave.d"
 import { LeaveRequestStatus } from "../../shared/enums/leave.enum";
 import { logger } from "../../core/utils/logger";
 import { DayOffRepository, dayOffRepository } from "./day-off.repository";
+import { LeaveRosterRepository, leaveRosterRepository } from "./leave-roster.repository";
 import {
   LeaveEmployeeRepository,
   leaveEmployeeRepository,
@@ -54,6 +58,7 @@ export interface LeaveRequestServiceDeps {
   requests: LeaveRequestRepository;
   dayOffs: Pick<DayOffRepository, "findByUsersInRange">;
   employees: LeaveEmployeeRepository;
+  roster: Pick<LeaveRosterRepository, "removeEmployeeFromRange">;
   clock: () => Date;
 }
 
@@ -61,6 +66,7 @@ const defaultDeps: LeaveRequestServiceDeps = {
   requests: leaveRequestRepository,
   dayOffs: dayOffRepository,
   employees: leaveEmployeeRepository,
+  roster: leaveRosterRepository,
   clock: () => new Date(),
 };
 
@@ -83,7 +89,7 @@ export class LeaveRequestService {
 
   async createRequest(actor: LeaveActor, body: unknown): Promise<LeaveRequestDto> {
     assertCanRequestLeave(actor);
-    const input = parseCreateLeaveRequest(body);
+    const input = parseCreateLeaveRequest(body, this.today());
     const { hotelId } = actor;
     const userId = actor.userId as string;
 
@@ -148,7 +154,7 @@ export class LeaveRequestService {
       throw LeaveErrors.requestNotFound();
     }
 
-    const today = todayInBusinessTimezone(this.deps.clock());
+    const today = this.today();
     const cancellable =
       existing.status === LeaveRequestStatus.PENDING ||
       (existing.status === LeaveRequestStatus.APPROVED && existing.fromDate > today);
@@ -200,6 +206,12 @@ export class LeaveRequestService {
     const reviewerId = await resolveReviewerId(actor, this.deps.employees);
     const existing = await this.loadReviewable(actor, leaveId);
 
+    // A leave that has already started cannot be approved. Its days are gone, so
+    // the only honest outcome is a rejection with a note.
+    if (existing.fromDate.getTime() < this.today().getTime()) {
+      throw LeaveErrors.startDatePassed();
+    }
+
     // Recompute against the current schedule. Offs may have been added since the request was made.
     const offs = await this.offKeysFor(hotelId, String(existing.userId), rangeOf(existing));
     if (countLeaveDays(rangeOf(existing), offs) === 0) throw LeaveErrors.noWorkingDays();
@@ -230,6 +242,22 @@ export class LeaveRequestService {
     if (conflicts.length > 0) {
       await this.deps.requests.revertApprovalToPending(hotelId, leaveId);
       throw LeaveErrors.overlappingLeave();
+    }
+
+    // The employee is now away, so take them off the rosters for those days. If that
+    // fails, revert to PENDING so the approval is not recorded without its effect.
+    // Re-approving is safe, because removing an absent employee changes nothing.
+    try {
+      const removed = await this.deps.roster.removeEmployeeFromRange(
+        hotelId,
+        String(approved.userId),
+        approved.fromDate,
+        approved.toDate,
+      );
+      logger.info("Employee removed from rosters for approved leave", { hotelId, leaveId, rosters: removed });
+    } catch (error) {
+      await this.deps.requests.revertApprovalToPending(hotelId, leaveId);
+      throw error;
     }
 
     logger.info("Leave request approved", { hotelId, leaveId, reviewerId });
@@ -264,6 +292,11 @@ export class LeaveRequestService {
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
+
+  /** Today in the business timezone, as a UTC-midnight calendar date. */
+  private today(): Date {
+    return todayInBusinessTimezone(this.deps.clock());
+  }
 
   /** Loads a request a manager may act on: it must exist in the hotel, be pending, and not be their own. */
   private async loadReviewable(actor: LeaveActor, leaveId: string): Promise<ILeaveRequest> {

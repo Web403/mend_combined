@@ -60,6 +60,14 @@ export function enumerateDays(from: Date, to: Date): Date[] {
   return days;
 }
 
+/**
+ * The calendar date (UTC) an instant falls on, as UTC midnight. Use it to turn a
+ * caller-supplied timestamp into the date-only value this module compares with.
+ */
+export function utcMidnight(instant: Date): Date {
+  return new Date(Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate()));
+}
+
 /** Adds whole calendar days to a calendar-date value. */
 export function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);

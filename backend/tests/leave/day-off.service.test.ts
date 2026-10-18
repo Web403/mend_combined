@@ -20,6 +20,7 @@ function setup() {
     requests: world.requestRepo,
     dayOffs: world.dayOffRepo,
     employees: world.employeeRepo,
+    roster: world.rosterRepo,
     clock,
   });
   const emp1 = world.addEmployee(HOTEL, { first: "Ravi", last: "Kumar" });
@@ -160,8 +161,8 @@ describe("DayOffService — assigning", () => {
     await expectLeaveError(
       offs.assignDayOffs(userActor(HOTEL, manager, [UserRole.MANAGER]), {
         userIds: ids,
-        fromDate: "2026-01-01",
-        toDate: "2026-04-02",
+        fromDate: "2026-11-01",
+        toDate: "2027-01-31",
       }),
       "LEAVE_VALIDATION_FAILED",
     );
@@ -239,5 +240,63 @@ describe("DayOffService — reading and removing", () => {
       toDate: "2026-11-01",
     })).created;
     await expectLeaveError(offs.deleteDayOff(userActor(HOTEL, emp1), created.id), "LEAVE_APPROVER_FORBIDDEN", 403);
+  });
+});
+
+describe("DayOffService — no backdating", () => {
+  const managerActor = (hotel: string, id: string) => userActor(hotel, id, [UserRole.MANAGER]);
+
+  it("refuses to schedule an off for a date before today (business timezone)", async () => {
+    const { offs, emp1, manager, world } = setup();
+    await expectLeaveError(
+      offs.assignDayOffs(managerActor(HOTEL, manager), { userIds: [emp1], fromDate: "2026-10-17", toDate: "2026-10-17" }),
+      "DAY_OFF_BACKDATED",
+      400,
+    );
+    expect(world.offs).toHaveLength(0);
+  });
+
+  it("refuses the whole batch when any day in the range is in the past", async () => {
+    const { offs, emp1, manager, world } = setup();
+    await expectLeaveError(
+      offs.assignDayOffs(managerActor(HOTEL, manager), { userIds: [emp1], fromDate: "2026-10-17", toDate: "2026-10-25" }),
+      "DAY_OFF_BACKDATED",
+      400,
+    );
+    expect(world.offs).toHaveLength(0);
+  });
+
+  it("accepts an off for today", async () => {
+    const { offs, emp1, manager } = setup();
+    const result = await offs.assignDayOffs(managerActor(HOTEL, manager), {
+      userIds: [emp1],
+      fromDate: "2026-10-18",
+      toDate: "2026-10-18",
+    });
+    expect(result.summary.createdCount).toBe(1);
+  });
+
+  it("refuses to remove an off whose date has passed, and keeps it", async () => {
+    const { offs, emp1, manager, world } = setup();
+    const [created] = (await offs.assignDayOffs(managerActor(HOTEL, manager), {
+      userIds: [emp1],
+      fromDate: "2026-10-18",
+      toDate: "2026-10-18",
+    })).created;
+
+    const later = new DayOffService({ dayOffs: world.dayOffRepo, employees: world.employeeRepo, clock: () => new Date("2026-10-19T06:00:00.000Z") });
+    await expectLeaveError(later.deleteDayOff(managerActor(HOTEL, manager), created.id), "DAY_OFF_BACKDATED", 400);
+    expect(world.offs).toHaveLength(1);
+  });
+
+  it("still allows removing an off for today", async () => {
+    const { offs, emp1, manager, world } = setup();
+    const [created] = (await offs.assignDayOffs(managerActor(HOTEL, manager), {
+      userIds: [emp1],
+      fromDate: "2026-10-18",
+      toDate: "2026-10-18",
+    })).created;
+    await expect(offs.deleteDayOff(managerActor(HOTEL, manager), created.id)).resolves.toEqual({ id: created.id, deleted: true });
+    expect(world.offs).toHaveLength(0);
   });
 });

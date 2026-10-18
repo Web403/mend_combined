@@ -22,6 +22,18 @@ export class LeaveError extends AppError {
 export const LeaveErrors = {
   // 400 — input
   validation: (reason: string) => new LeaveError("LEAVE_VALIDATION_FAILED", reason, 400),
+  backdated: () =>
+    new LeaveError(
+      "LEAVE_BACKDATED",
+      "Leave cannot start before today. Ask your manager to record past absences",
+      400,
+    ),
+  dayOffBackdated: () =>
+    new LeaveError(
+      "DAY_OFF_BACKDATED",
+      "Offs cannot be scheduled or removed for dates before today",
+      400,
+    ),
   noWorkingDays: () =>
     new LeaveError(
       "LEAVE_NO_WORKING_DAYS",
@@ -75,6 +87,12 @@ export const LeaveErrors = {
     new LeaveError(
       "LEAVE_NOT_PENDING",
       `Only pending leave requests can be reviewed (current status: ${status})`,
+      409,
+    ),
+  startDatePassed: () =>
+    new LeaveError(
+      "LEAVE_START_DATE_PASSED",
+      "This leave's start date has passed, so it can no longer be approved. Reject it instead",
       409,
     ),
   notCancellable: () =>

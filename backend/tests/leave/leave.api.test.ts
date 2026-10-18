@@ -9,6 +9,7 @@
  */
 
 import request from "supertest";
+import mongoose from "mongoose";
 
 jest.mock("../../src/modules/users/user.model", () => ({
   UserModel: require("../helpers/fixtures").UserModel,
@@ -26,6 +27,11 @@ jest.mock("../../src/modules/leave/leave-request.model", () => ({
     timestamps: true,
   }),
 }));
+jest.mock("../../src/modules/rosters/roster.model", () => ({
+  RosterModel: require("../helpers/memory-db").createMemoryModel("Roster", "rosters", {
+    required: ["hotelId", "date", "shiftId"],
+  }),
+}));
 jest.mock("../../src/modules/leave/day-off.model", () => ({
   DayOffModel: require("../helpers/memory-db").createMemoryModel("DayOff", "dayoffs", {
     required: ["hotelId", "userId", "date", "type", "assignedBy"],
@@ -40,6 +46,7 @@ import { ROUTE_PREFIX } from "../../src/shared/constants";
 import { UserRole } from "../../src/shared/enums/user";
 import { LeaveRequestModel } from "../../src/modules/leave/leave-request.model";
 import { DayOffModel } from "../../src/modules/leave/day-off.model";
+import { RosterModel } from "../../src/modules/rosters/roster.model";
 import type { MemoryModel } from "../helpers/memory-db";
 import {
   hotelTokenFor,
@@ -53,7 +60,19 @@ const app = createApp();
 // The jest.mock'd models are in-memory doubles; these casts expose their test helpers.
 const leaveRequestStore = LeaveRequestModel as unknown as MemoryModel;
 const dayOffStore = DayOffModel as unknown as MemoryModel;
+const rosterStore = RosterModel as unknown as MemoryModel;
 const LEAVE = `${ROUTE_PREFIX}/leave`;
+
+/**
+ * "Today" is 18 Oct 2026 (IST 11:30). Only Date is faked, so supertest and the
+ * rest of the stack keep real timers.
+ */
+const NOW = new Date("2026-10-18T06:00:00.000Z");
+const ALL_BUT_DATE = [
+  "hrtime", "nextTick", "performance", "queueMicrotask", "requestAnimationFrame",
+  "cancelAnimationFrame", "requestIdleCallback", "cancelIdleCallback", "setImmediate",
+  "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout",
+] as const;
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
 let hotelA: any;
@@ -65,9 +84,11 @@ let managerB: any;
 let gigWorker: any;
 
 beforeEach(() => {
+  jest.useFakeTimers({ now: NOW, doNotFake: [...ALL_BUT_DATE] });
   resetWorld();
   leaveRequestStore.reset();
   dayOffStore.reset();
+  rosterStore.reset();
 
   hotelA = makeHotel("Hotel Alpha");
   hotelB = makeHotel("Hotel Beta");
@@ -390,3 +411,85 @@ describe("off days shape leave days", () => {
   });
 });
 
+
+describe("no backdating over HTTP", () => {
+  it("refuses a leave request that starts before today with LEAVE_BACKDATED", async () => {
+    const res = await submit(tokenFor(employeeA1), leaveBody({ fromDate: "2026-10-17", toDate: "2026-10-18" }));
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ success: false, meta: { code: "LEAVE_BACKDATED" } });
+    expect(leaveRequestStore.docs).toHaveLength(0);
+  });
+
+  it("refuses to approve a request whose start date has passed, with LEAVE_START_DATE_PASSED", async () => {
+    const created = await submit(tokenFor(employeeA1), leaveBody({ fromDate: "2026-10-19", toDate: "2026-10-20" }));
+    expect(created.status).toBe(201);
+
+    jest.setSystemTime(new Date("2026-10-20T06:00:00.000Z"));
+    const res = await request(app)
+      .patch(`${LEAVE}/requests/${created.body.data.id}/approve`)
+      .set(bearer(tokenFor(managerA)))
+      .send({});
+    expect(res.status).toBe(409);
+    expect(res.body.meta.code).toBe("LEAVE_START_DATE_PASSED");
+
+    const rejected = await request(app)
+      .patch(`${LEAVE}/requests/${created.body.data.id}/reject`)
+      .set(bearer(tokenFor(managerA)))
+      .send({ note: "Started before the decision" });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.data.status).toBe("REJECTED");
+  });
+
+  it("refuses to schedule an off before today with DAY_OFF_BACKDATED, and to remove a past off", async () => {
+    const past = await request(app)
+      .post(`${LEAVE}/offs`)
+      .set(bearer(tokenFor(managerA)))
+      .send({ userIds: [employeeA1._id.toString()], fromDate: "2026-10-17", toDate: "2026-10-17" });
+    expect(past.status).toBe(400);
+    expect(past.body.meta.code).toBe("DAY_OFF_BACKDATED");
+    expect(dayOffStore.docs).toHaveLength(0);
+
+    const today = await request(app)
+      .post(`${LEAVE}/offs`)
+      .set(bearer(tokenFor(managerA)))
+      .send({ userIds: [employeeA1._id.toString()], fromDate: "2026-10-18", toDate: "2026-10-18" });
+    expect(today.status).toBe(201);
+    const offId = today.body.data.created[0].id;
+
+    jest.setSystemTime(new Date("2026-10-19T06:00:00.000Z"));
+    const removal = await request(app).delete(`${LEAVE}/offs/${offId}`).set(bearer(tokenFor(managerA)));
+    expect(removal.status).toBe(400);
+    expect(removal.body.meta.code).toBe("DAY_OFF_BACKDATED");
+    expect(dayOffStore.docs).toHaveLength(1);
+  });
+});
+
+describe("approval over HTTP removes the employee from rosters", () => {
+  it("takes the employee off the rosters for the leave dates, over the real route", async () => {
+    const id = (value: unknown) => String(value);
+    const rosterFor = (date: string, employees: string[]) =>
+      rosterStore.insertRaw({
+        _id: new mongoose.Types.ObjectId(),
+        id: `RST_${date}`,
+        hotelId: hotelA._id,
+        date: new Date(`${date}T00:00:00.000Z`),
+        shiftId: new mongoose.Types.ObjectId(),
+        employees: employees.map((e) => new mongoose.Types.ObjectId(e)),
+      });
+    const e1 = employeeA1._id.toString();
+    const e2 = employeeA2._id.toString();
+    rosterFor("2026-11-02", [e1, e2]);
+    const kept = rosterFor("2026-11-05", [e1]);
+
+    const created = await submit(tokenFor(employeeA1)); // 2–4 Nov
+    const res = await request(app)
+      .patch(`${LEAVE}/requests/${created.body.data.id}/approve`)
+      .set(bearer(tokenFor(managerA)))
+      .send({});
+    expect(res.status).toBe(200);
+
+    const onNov2 = rosterStore.docs.find((r) => String(r.date.toISOString()).startsWith("2026-11-02"));
+    expect(onNov2!.employees.map(id)).toEqual([e2]);
+    expect(kept.employees.map(id)).toEqual([e1]);
+  });
+});

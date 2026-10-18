@@ -14,6 +14,7 @@ import type { LeaveRequestRepository } from "../../src/modules/leave/leave-reque
 import { LIVE_LEAVE_STATUSES } from "../../src/modules/leave/leave-request.repository";
 import type { DayOffRepository } from "../../src/modules/leave/day-off.repository";
 import type { LeaveEmployeeRepository, LeaveEmployeeRecord } from "../../src/modules/leave/leave-employee.repository";
+import type { LeaveRosterRepository } from "../../src/modules/leave/leave-roster.repository";
 import type { LeaveActor } from "../../src/modules/leave/leave.actor";
 import { parseDateOnly } from "../../src/modules/leave/leave.date";
 
@@ -24,6 +25,8 @@ export function createFakeWorld() {
   const requests: any[] = [];
   const offs: any[] = [];
   const employees: any[] = [];
+
+  const rosters: any[] = [];
 
   const requestRepo: LeaveRequestRepository = {
     async create(data) {
@@ -46,6 +49,18 @@ export function createFakeWorld() {
             r.fromDate <= to &&
             r.toDate >= from &&
             (excludeId === undefined || !sameId(r._id, excludeId)),
+        )
+        .map((r) => ({ ...r }));
+    },
+    async findLiveInRangeForUsers({ hotelId, userIds, from, to }) {
+      return requests
+        .filter(
+          (r) =>
+            sameId(r.hotelId, hotelId) &&
+            userIds.some((u) => sameId(u, r.userId)) &&
+            LIVE_LEAVE_STATUSES.includes(r.status) &&
+            r.fromDate <= to &&
+            r.toDate >= from,
         )
         .map((r) => ({ ...r }));
     },
@@ -155,6 +170,37 @@ export function createFakeWorld() {
     },
   };
 
+  /** Roster fake: `removeEmployeeFromRange` pulls the employee from matching rosters. `failNext` makes the next call throw. */
+  const rosterRepo: LeaveRosterRepository & { failNext: boolean } = {
+    failNext: false,
+    async removeEmployeeFromRange(hotelId, userId, from, to) {
+      if (rosterRepo.failNext) {
+        rosterRepo.failNext = false;
+        throw new Error("roster write failed");
+      }
+      let changed = 0;
+      for (const roster of rosters) {
+        if (!sameId(roster.hotelId, hotelId) || roster.date < from || roster.date > to) continue;
+        const before = roster.employees.length;
+        roster.employees = roster.employees.filter((id: unknown) => !sameId(id, userId));
+        if (roster.employees.length !== before) changed++;
+      }
+      return changed;
+    },
+  };
+
+  function addRoster(hotelId: string, date: string, employeeIds: string[]) {
+    const roster = {
+      _id: oid(),
+      hotelId,
+      date: d(date),
+      shiftId: oid(),
+      employees: employeeIds.map((id) => new Types.ObjectId(id)),
+    };
+    rosters.push(roster);
+    return roster;
+  }
+
   function addEmployee(hotelId: string, opts: { role?: UserRole; status?: UserStatus; first?: string; last?: string } = {}) {
     const _id = oid();
     employees.push({
@@ -167,7 +213,7 @@ export function createFakeWorld() {
     return _id.toString();
   }
 
-  return { requests, offs, employees, requestRepo, dayOffRepo, employeeRepo, addEmployee };
+  return { requests, offs, employees, rosters, requestRepo, dayOffRepo, employeeRepo, rosterRepo, addEmployee, addRoster };
 }
 
 export function userActor(hotelId: string, userId: string, roles: string[] = [UserRole.EMPLOYEE]): LeaveActor {

@@ -43,11 +43,15 @@ Rules that apply to everyone:
 ## Lifecycle of a leave request
 
 ```
-PENDING ──approve──▶ APPROVED
+PENDING ──approve──▶ APPROVED        (only if fromDate is not before today in IST)
    │  ├──reject───▶ REJECTED         (note required)
    │  └──cancel───▶ CANCELLED        (by employee)
 APPROVED ──cancel──▶ CANCELLED       (by employee, only if fromDate is after today in IST)
 ```
+
+**Nothing is backdated.** Leave cannot start before today (IST), and offs cannot be scheduled or removed for a past date. A pending request whose start date has passed can still be rejected or cancelled, but not approved.
+
+**Approval removes the employee from rosters.** Approving a leave takes the employee off every roster of the hotel that falls in the leave's date range. See "Rosters and leave" below.
 
 ## Endpoints
 
@@ -63,6 +67,7 @@ Body:
 - `type`: `CASUAL | SICK | EARNED | UNPAID | OTHER`
 - `reason`: required, 1–500 characters
 - Range: `toDate >= fromDate`, at most 90 days
+- `fromDate` must not be before today (IST), otherwise 400 `LEAVE_BACKDATED`
 - Rejected if it overlaps one of the employee's **PENDING or APPROVED** requests (409 `LEAVE_OVERLAP`), or if every day is an existing off (400 `LEAVE_NO_WORKING_DAYS`)
 - `userId`, `hotelId`, `status` and similar fields in the body are ignored
 
@@ -95,7 +100,11 @@ Allowed when the request is `PENDING`, or `APPROVED` with `fromDate` later than 
 
 Body (optional): `{ "note": "Covered by Deepak" }` (max 500 characters)
 
+Refused with 409 `LEAVE_START_DATE_PASSED` if `fromDate` is before today (IST). Reject it instead.
+
 Re-checks overlaps at approval time. If two overlapping requests are approved at the same moment, the second one is rolled back to `PENDING` and gets 409 `LEAVE_OVERLAP`.
+
+After the status change, the employee is removed from every roster of the hotel with a date in `[fromDate, toDate]`. The roster write is not transactional, so if it fails the approval is rolled back to `PENDING` and the error is returned. Retrying is safe: removing an employee who is already off a roster changes nothing.
 
 #### 7. Reject — manager / admin / hotel owner
 `PATCH /leave/requests/:id/reject`
@@ -121,6 +130,7 @@ Body:
 - `userIds`: 1–200 employees, all must belong to the hotel (404 `EMPLOYEE_NOT_FOUND` lists any that don't).
 - `weekdays` (optional): 0 = Sunday … 6 = Saturday. Omit for every day in the range. For example, `[0]` gives every Sunday.
 - `type` defaults to `WEEKLY_OFF`.
+- `fromDate` must not be before today (IST), otherwise 400 `DAY_OFF_BACKDATED`. The whole batch is refused.
 - Limits: range up to 92 days, and employees × days up to 2,000 per call.
 - Idempotent: a day that already has an off for that employee is skipped, not duplicated.
 
@@ -146,7 +156,42 @@ Response `data`:
 - Not paginated, returns `data: DayOffDto[]`.
 
 #### 11. Remove an off — manager / admin / hotel owner
-`DELETE /leave/offs/:id` → 200 `{ "id": "…", "deleted": true }` · 404 `DAY_OFF_NOT_FOUND`
+`DELETE /leave/offs/:id` → 200 `{ "id": "…", "deleted": true }` · 404 `DAY_OFF_NOT_FOUND` · 400 `DAY_OFF_BACKDATED` if the off's date has passed (IST)
+
+### Rosters and leave
+
+Roster create and update check each assigned employee against their offs and leave. They **warn but do not block**: the assignment is saved, and the response lists what was overridden.
+
+- `POST /api/v1/roster/create-roster` → 201 · `PUT /api/v1/roster/update-roster/:id` → 200
+
+The response keeps its usual `data` shape. `meta.warnings` is always present and is an array (empty when there are no conflicts):
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "data": [ { "_id": "…", "date": "2026-11-03T00:00:00.000Z", "shiftId": "…", "employees": ["…"] } ],
+  "meta": {
+    "warnings": [
+      { "kind": "DAY_OFF", "employeeId": "65a1…", "date": "2026-11-03", "offType": "COMP_OFF" },
+      { "kind": "APPROVED_LEAVE", "employeeId": "65a2…", "date": "2026-11-03", "leaveId": "…", "leaveType": "SICK" },
+      { "kind": "PENDING_LEAVE", "employeeId": "65a2…", "date": "2026-11-04", "leaveId": "…", "leaveType": "CASUAL" }
+    ]
+  }
+}
+```
+
+| `kind` | Meaning |
+|---|---|
+| `DAY_OFF` | The employee has a scheduled off that day. Carries `offType`. |
+| `APPROVED_LEAVE` | The employee has approved leave covering that day. Carries `leaveId`, `leaveType`. |
+| `PENDING_LEAVE` | The employee has leave awaiting a decision that day. Carries `leaveId`, `leaveType`. |
+
+Warnings are sorted by date, then employee, then kind. Rejected and cancelled leave produce no warning.
+
+Create (`create-roster`) takes `fromDate`, `toDate` (inclusive, one roster per calendar day, stored at UTC midnight), `shiftId` and `employees`. Update (`update-roster`) takes any of `date`, `shiftId` and `employees`. Other fields in the body, including `hotelId`, are ignored. The warnings describe the roster as stored after the change.
+
+Errors from the roster module use the standard envelope with `meta.code`: 400 `INVALID_DATE` (unparseable date, or `toDate` before `fromDate`), 404 `ROSTER_NOT_FOUND`.
 
 ## DTOs
 
@@ -190,6 +235,8 @@ Response `data`:
 |---|---|---|
 | 400 | `LEAVE_VALIDATION_FAILED` | Bad field, date format, range, id, or pagination value |
 | 400 | `LEAVE_NO_WORKING_DAYS` | Every day in the requested leave range is already an off |
+| 400 | `LEAVE_BACKDATED` | Leave request starts before today (IST) |
+| 400 | `DAY_OFF_BACKDATED` | Off assigned or removed for a date before today (IST) |
 | 401 | `UNAUTHENTICATED` | Missing or invalid token |
 | 403 | `LEAVE_NO_HOTEL_SCOPE` | Token has no hotel (e.g. a gig worker, or a stale session) |
 | 403 | `LEAVE_REQUESTER_FORBIDDEN` | Role cannot request leave |
@@ -201,6 +248,7 @@ Response `data`:
 | 404 | `EMPLOYEE_NOT_FOUND` | An employee in `userIds` is not in this hotel |
 | 409 | `LEAVE_OVERLAP` | Overlaps a pending or approved request |
 | 409 | `LEAVE_NOT_PENDING` | Already approved, rejected, or cancelled |
+| 409 | `LEAVE_START_DATE_PASSED` | Approving a pending leave whose start date has passed. Reject it instead |
 | 409 | `LEAVE_NOT_CANCELLABLE` | Rejected/cancelled, or approved and already started |
 | 409 | `LEAVE_CONCURRENT_UPDATE` | Changed by someone else at the same moment. Refresh and retry |
 | 409 | `DAY_OFF_CONCURRENT_UPDATE` | Schedule changed during assignment. Refresh and retry |
@@ -217,8 +265,10 @@ Response `data`:
 ## Known limits and follow-ups
 
 - **No leave balances or entitlements.** Requests are not checked against a quota. This needs a product decision and a balance model.
-- **Approval does not change the roster.** An approved leave does not remove the employee from a shift. Roster assignment also does not warn about offs yet. Both are follow-ups.
+- **Cancelling an approved leave does not restore the roster.** Approval removes the employee from rostered shifts. If the leave is then cancelled, the manager must add the employee back by hand.
+- **A roster write can race an approval.** If someone adds the employee to a roster at the same moment as approval, they can briefly be on both. The roster warnings show it as `APPROVED_LEAVE` on the next roster write for that day.
+- **Rosters can be created for past dates.** Only leave and offs are refused for past dates. Roster creation is not checked.
 - **Approver scope is the whole hotel.** The data model has no manager → employee reporting line, so every manager can review every employee in the hotel.
-- **Backdating is allowed.** A request may cover past dates, for example to record sick leave. The manager's approval is the control.
+- **Recording past sick leave needs a separate path.** Backdating is refused, so a sick day that has already passed cannot be entered as leave. A manager-recorded past absence needs a product decision and is not built.
 - **Permissions are by role.** These routes use role lists in `leave.constants.ts`, not the RBAC permission table.
 - **Race handling** uses conditional updates, a deterministic tie-break on submit, and a rollback on approve. It does not use multi-document transactions, so if the server crashes in the middle of a submit or approve, a rare inconsistency can persist. Submit can leave a duplicate `PENDING` request, and approve can leave two overlapping `APPROVED` requests. Managers can spot the second case in `GET /leave/requests?status=APPROVED` and reject one. Transactions would close this gap, but they need a replica set.

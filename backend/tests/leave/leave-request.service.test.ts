@@ -14,6 +14,7 @@ function setup() {
     requests: world.requestRepo,
     dayOffs: world.dayOffRepo,
     employees: world.employeeRepo,
+    roster: world.rosterRepo,
     clock,
   });
   const emp1 = world.addEmployee(HOTEL, { first: "Ravi", last: "Kumar" });
@@ -363,14 +364,15 @@ describe("LeaveRequestService — employee cancellation", () => {
   });
 
   it("refuses to cancel an approved leave that has already started", async () => {
-    const { service, emp1, manager } = setup();
-    // Today is 18 Oct 2026 in India, so this leave started a week ago.
+    const { service, world, emp1, manager } = setup();
+    // Requested and approved on 18 Oct 2026 for a leave starting 19 Oct. Cancelling on 20 Oct is too late.
     const req = await service.createRequest(
       userActor(HOTEL, emp1),
-      leave({ fromDate: "2026-10-11", toDate: "2026-10-20" }),
+      leave({ fromDate: "2026-10-19", toDate: "2026-10-20" }),
     );
     await service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {});
-    await expectLeaveError(service.cancelRequest(userActor(HOTEL, emp1), req.id), "LEAVE_NOT_CANCELLABLE", 409);
+    const later = serviceAt(world, "2026-10-20T06:00:00.000Z");
+    await expectLeaveError(later.cancelRequest(userActor(HOTEL, emp1), req.id), "LEAVE_NOT_CANCELLABLE", 409);
   });
 
   it("refuses to cancel a rejected request", async () => {
@@ -450,5 +452,133 @@ describe("LeaveRequestService — reading and tenant isolation", () => {
     await expectLeaveError(service.approveRequest(intruder, req.id, {}), "LEAVE_REQUEST_NOT_FOUND", 404);
     await expectLeaveError(service.rejectRequest(intruder, req.id, { note: "x" }), "LEAVE_REQUEST_NOT_FOUND", 404);
     await expect(service.listRequests(intruder, {})).resolves.toMatchObject({ items: [] });
+  });
+});
+
+/** A service over the same world, with "now" set to `iso`. Used to move time forward between steps. */
+const serviceAt = (world: ReturnType<typeof createFakeWorld>, iso: string) =>
+  new LeaveRequestService({
+    requests: world.requestRepo,
+    dayOffs: world.dayOffRepo,
+    employees: world.employeeRepo,
+    roster: world.rosterRepo,
+    clock: () => new Date(iso),
+  });
+
+const dayOf = (date: Date) => date.toISOString().slice(0, 10);
+
+describe("LeaveRequestService — backdating", () => {
+  it("refuses a leave that starts before today (business timezone)", async () => {
+    const { service, emp1 } = setup();
+    await expectLeaveError(
+      service.createRequest(userActor(HOTEL, emp1), leave({ fromDate: "2026-10-17", toDate: "2026-10-20" })),
+      "LEAVE_BACKDATED",
+      400,
+    );
+  });
+
+  it("accepts a leave that starts today", async () => {
+    const { service, emp1 } = setup();
+    const dto = await service.createRequest(
+      userActor(HOTEL, emp1),
+      leave({ fromDate: "2026-10-18", toDate: "2026-10-19" }),
+    );
+    expect(dto.status).toBe(LeaveRequestStatus.PENDING);
+  });
+
+  it("refuses to approve a pending request whose start date has passed, and leaves it pending", async () => {
+    const { world, emp1, manager } = setup();
+    const req = await serviceAt(world, "2026-10-18T06:00:00.000Z").createRequest(
+      userActor(HOTEL, emp1),
+      leave({ fromDate: "2026-10-19", toDate: "2026-10-20" }),
+    );
+    const later = serviceAt(world, "2026-10-20T06:00:00.000Z");
+    const actor = userActor(HOTEL, manager, [UserRole.MANAGER]);
+
+    await expectLeaveError(later.approveRequest(actor, req.id, {}), "LEAVE_START_DATE_PASSED", 409);
+    expect(world.requests[0].status).toBe(LeaveRequestStatus.PENDING);
+    expect(world.requests[0].reviewedBy).toBeUndefined();
+  });
+
+  it("still allows rejecting, and cancelling by the employee, a pending request whose start date has passed", async () => {
+    const { world, emp1, emp2, manager } = setup();
+    const actor = userActor(HOTEL, manager, [UserRole.MANAGER]);
+    const first = await serviceAt(world, "2026-10-18T06:00:00.000Z").createRequest(
+      userActor(HOTEL, emp1),
+      leave({ fromDate: "2026-10-19", toDate: "2026-10-20" }),
+    );
+    const second = await serviceAt(world, "2026-10-18T06:00:00.000Z").createRequest(
+      userActor(HOTEL, emp2),
+      leave({ fromDate: "2026-10-21", toDate: "2026-10-22" }),
+    );
+    const later = serviceAt(world, "2026-10-20T06:00:00.000Z");
+
+    await expect(later.rejectRequest(actor, first.id, { note: "Too late to approve" })).resolves.toMatchObject({
+      status: LeaveRequestStatus.REJECTED,
+    });
+    await expect(later.cancelRequest(userActor(HOTEL, emp2), second.id)).resolves.toMatchObject({
+      status: LeaveRequestStatus.CANCELLED,
+    });
+  });
+
+  it("approves a leave that starts today", async () => {
+    const { service, emp1, manager } = setup();
+    const req = await service.createRequest(
+      userActor(HOTEL, emp1),
+      leave({ fromDate: "2026-10-18", toDate: "2026-10-19" }),
+    );
+    await expect(
+      service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {}),
+    ).resolves.toMatchObject({ status: LeaveRequestStatus.APPROVED });
+  });
+});
+
+describe("LeaveRequestService — approval removes the employee from rosters", () => {
+  it("takes the employee off every roster in the leave's date range, and only those", async () => {
+    const { service, world, emp1, emp2, manager } = setup();
+    world.addRoster(HOTEL, "2026-11-01", [emp1, emp2]);
+    world.addRoster(HOTEL, "2026-11-02", [emp1, emp2]);
+    world.addRoster(HOTEL, "2026-11-03", [emp1]);
+    world.addRoster(HOTEL, "2026-11-04", [emp1]);
+    world.addRoster(HOTEL, "2026-11-05", [emp1]);
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave()); // 2–4 Nov
+    await service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {});
+
+    const onRosters = Object.fromEntries(
+      world.rosters.map((r) => [dayOf(r.date), r.employees.map((id: unknown) => String(id))]),
+    );
+    expect(onRosters).toEqual({
+      "2026-11-01": [emp1, emp2],
+      "2026-11-02": [emp2],
+      "2026-11-03": [],
+      "2026-11-04": [],
+      "2026-11-05": [emp1],
+    });
+  });
+
+  it("does not touch another hotel's rosters", async () => {
+    const { service, world, emp1, manager } = setup();
+    const otherHotelRoster = world.addRoster(OTHER_HOTEL, "2026-11-02", [emp1]);
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+    await service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {});
+    expect(otherHotelRoster.employees.map(String)).toEqual([emp1]);
+  });
+
+  it("reverts to PENDING and rethrows when the roster write fails, then succeeds on retry", async () => {
+    const { service, world, emp1, manager } = setup();
+    const actor = userActor(HOTEL, manager, [UserRole.MANAGER]);
+    world.addRoster(HOTEL, "2026-11-02", [emp1]);
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+
+    world.rosterRepo.failNext = true;
+    await expect(service.approveRequest(actor, req.id, {})).rejects.toThrow("roster write failed");
+    expect(world.requests[0].status).toBe(LeaveRequestStatus.PENDING);
+    expect(world.requests[0].reviewedBy).toBeUndefined();
+    expect(world.rosters[0].employees.map(String)).toEqual([emp1]);
+
+    await expect(service.approveRequest(actor, req.id, {})).resolves.toMatchObject({
+      status: LeaveRequestStatus.APPROVED,
+    });
+    expect(world.rosters[0].employees.map(String)).toEqual([]);
   });
 });

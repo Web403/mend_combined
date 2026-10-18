@@ -90,6 +90,11 @@ function compare(a: any, b: any): number {
 function matchField(doc: Doc, path: string, condition: any): boolean {
   const value = getPath(doc, path);
 
+  // Mongo matches `{ tags: x }` against an array when any element equals x.
+  if (Array.isArray(value) && !isPlainObject(condition)) {
+    return value.some((item) => looseEq(item, condition));
+  }
+
   if (isPlainObject(condition)) {
     for (const [operator, operand] of Object.entries(condition)) {
       switch (operator) {
@@ -490,22 +495,62 @@ export class MemoryModel {
   }
 
   /**
-   * Mirrors `Model.findOneAndUpdate(filter, { $set, $unset }, { new: true })`.
+   * Mirrors `Model.findOneAndUpdate(filter, update, { new: true })`.
    * Returns a thenable with `.lean()`, like the Mongoose query it stands in for.
+   * Always resolves to the post-update document.
    */
   findOneAndUpdate(filter: Doc = {}, update: Doc = {}, options: { new?: boolean } = {}) {
     return new MemoryUpdateQuery(() => {
       const doc = this.docs.find((candidate) => matches(candidate, filter));
       if (!doc) return null;
-      for (const [key, value] of Object.entries(update.$set ?? {})) {
-        if (value !== undefined) doc[key] = value;
-      }
-      for (const key of Object.keys(update.$unset ?? {})) {
-        delete doc[key];
-      }
-      if (this.options.timestamps) doc.updatedAt = new Date();
+      this.applyUpdate(doc, update);
       return { ...doc };
     }, options);
+  }
+
+  /** Mirrors `Model.updateOne(filter, update)`. Updates the first match only. */
+  async updateOne(filter: Doc = {}, update: Doc = {}): Promise<{ matchedCount: number; modifiedCount: number }> {
+    const doc = this.docs.find((candidate) => matches(candidate, filter));
+    if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+    this.applyUpdate(doc, update);
+    return { matchedCount: 1, modifiedCount: 1 };
+  }
+
+  /** Mirrors `Model.updateMany(filter, update)`. */
+  async updateMany(filter: Doc = {}, update: Doc = {}): Promise<{ matchedCount: number; modifiedCount: number }> {
+    const matched = this.docs.filter((candidate) => matches(candidate, filter));
+    for (const doc of matched) this.applyUpdate(doc, update);
+    return { matchedCount: matched.length, modifiedCount: matched.length };
+  }
+
+  /** Applies the subset of update operators the modules use: $set, $unset, $push (with $each), $addToSet, $pull (value or $in). */
+  private applyUpdate(doc: Doc, update: Doc) {
+    // Like Mongoose, a plain (non-operator) key in the update is a `$set`.
+    const plain = Object.fromEntries(Object.entries(update).filter(([key]) => !key.startsWith("$")));
+    for (const [key, value] of Object.entries({ ...plain, ...(update.$set ?? {}) })) {
+      if (value !== undefined) doc[key] = value;
+    }
+    for (const key of Object.keys(update.$unset ?? {})) {
+      delete doc[key];
+    }
+    for (const [key, spec] of Object.entries(update.$push ?? {})) {
+      const items: any[] = isPlainObject(spec) && "$each" in spec ? (spec as Doc).$each : [spec];
+      doc[key] = [...(Array.isArray(doc[key]) ? doc[key] : []), ...items];
+    }
+    for (const [key, spec] of Object.entries(update.$addToSet ?? {})) {
+      const current: any[] = Array.isArray(doc[key]) ? doc[key] : [];
+      const items: any[] = isPlainObject(spec) && "$each" in spec ? (spec as Doc).$each : [spec];
+      doc[key] = [...current, ...items.filter((item) => !current.some((c) => looseEq(c, item)))];
+    }
+    for (const [key, spec] of Object.entries(update.$pull ?? {})) {
+      if (!Array.isArray(doc[key])) continue;
+      const pulls = (item: any) =>
+        isPlainObject(spec) && "$in" in spec
+          ? (spec as Doc).$in.some((v: any) => looseEq(item, v))
+          : looseEq(item, spec);
+      doc[key] = doc[key].filter((item: any) => !pulls(item));
+    }
+    if (this.options.timestamps) doc.updatedAt = new Date();
   }
 
   async deleteOne(filter: Doc = {}): Promise<{ deletedCount: number }> {
@@ -541,6 +586,11 @@ class MemoryUpdateQuery implements PromiseLike<any> {
     private readonly apply: () => Doc | null,
     private readonly options: { new?: boolean } = {},
   ) {}
+
+  // Population is a no-op: the in-memory store holds ids, which is what callers read.
+  populate() {
+    return this;
+  }
 
   lean() {
     return this;

@@ -6,6 +6,9 @@
 // Offs need no approval and do not use up leave. They are excluded from the
 // leave day count (see leave-request.service.ts).
 //
+// Nothing is backdated: offs cannot be scheduled for, or removed from, a date
+// before today (business timezone). Past attendance is not rewritten here.
+//
 // Assignment is idempotent. An employee who already has an off on a date is
 // skipped and reported, not duplicated or failed.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,7 +70,7 @@ export class DayOffService {
 
   async assignDayOffs(actor: LeaveActor, body: unknown): Promise<AssignDayOffsResult> {
     assertCanReviewLeave(actor);
-    const input = parseAssignDayOffs(body);
+    const input = parseAssignDayOffs(body, this.today());
     const { hotelId } = actor;
 
     const reviewerId = await resolveReviewerId(actor, this.deps.employees);
@@ -187,10 +190,16 @@ export class DayOffService {
 
     const existing = await this.deps.dayOffs.findByIdInHotel(actor.hotelId, dayOffId);
     if (!existing) throw LeaveErrors.dayOffNotFound();
+    if (existing.date.getTime() < this.today().getTime()) throw LeaveErrors.dayOffBackdated();
 
     await this.deps.dayOffs.deleteById(actor.hotelId, dayOffId);
     logger.info("Day off removed", { hotelId: actor.hotelId, dayOffId });
     return { id: dayOffId, deleted: true };
+  }
+
+  /** Today in the business timezone, as a UTC-midnight calendar date. */
+  private today(): Date {
+    return todayInBusinessTimezone(this.deps.clock());
   }
 
   private async employeeLookup(hotelId: string, docs: IDayOff[]) {

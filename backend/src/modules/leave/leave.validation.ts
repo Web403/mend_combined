@@ -198,10 +198,20 @@ export function assertRangeWithinSpan(range: DateRange, maxSpanDays: number, lab
 
 // ── Payload parsers ───────────────────────────────────────────────────────────
 
-export function parseCreateLeaveRequest(body: unknown): CreateLeaveRequestInput {
+/**
+ * Rejects a start date before `today` (business timezone). Backdating is not
+ * allowed: a leave request, an approval, or a schedule change cannot reach into
+ * days that have already begun.
+ */
+export function assertNotBackdated(from: Date, today: Date, error: () => Error): void {
+  if (from.getTime() < today.getTime()) throw error();
+}
+
+export function parseCreateLeaveRequest(body: unknown, today: Date): CreateLeaveRequestInput {
   const input = asRecord(body);
   const from = parseDateOnly(input.fromDate, "fromDate");
   const to = parseDateOnly(input.toDate, "toDate");
+  assertNotBackdated(from, today, LeaveErrors.backdated);
   assertRangeWithinSpan({ from, to }, LEAVE_REQUEST_MAX_SPAN_DAYS, "A leave request");
 
   return {
@@ -228,10 +238,11 @@ export function parseReviewDecision(
   };
 }
 
-export function parseAssignDayOffs(body: unknown): AssignDayOffsInput {
+export function parseAssignDayOffs(body: unknown, today: Date): AssignDayOffsInput {
   const input = asRecord(body);
   const from = parseDateOnly(input.fromDate, "fromDate");
   const to = parseDateOnly(input.toDate, "toDate");
+  assertNotBackdated(from, today, LeaveErrors.dayOffBackdated);
   assertRangeWithinSpan({ from, to }, DAY_OFF_ASSIGN_MAX_SPAN_DAYS, "An off assignment");
 
   if (!Array.isArray(input.userIds) || input.userIds.length === 0) {
