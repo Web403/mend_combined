@@ -8,8 +8,7 @@
 //   FR56 — Recruiters shortlist candidates
 //   FR57 — Candidate ranking (rankScore from passport data)
 //   FR58 — Rating system (post-hire star rating)
-//   FR59 — Prevent exploitative job posts (shift/recovery policy validation)
-//   FR60 — Flag unsafe shift patterns
+//   FR60 — Flag unsafe shift patterns (phrase checks only)
 //   FR61 — Block non-compliant hotels from hiring
 //   FR62 — Recruitment audit trail (status history on application)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +37,6 @@ import type {
   ReviewApplicationDto,
   UpdateJobDto,
 } from "../../shared/interfaces/recruitment.d";
-import { extractHours } from "../../core/utils/pattern.helper";
 import { Types } from "mongoose";
 
 // ── Valid application status transitions (FR62 — audit trail) ─────────────────
@@ -82,18 +80,6 @@ function detectUnsafeShiftPattern(
     if (pattern.test(shiftPolicy) || pattern.test(recoveryPolicy)) {
       return "Unsafe shift or recovery policy detected.";
     }
-  }
-
-  // Validate shift duration
-  const shiftHours = extractHours(shiftPolicy);
-  if (shiftHours !== null && shiftHours > 10) {
-    return `Shift duration is ${shiftHours} hours. Maximum allowed is 10 hours.`;
-  }
-
-  // Validate recovery duration
-  const recoveryHours = extractHours(recoveryPolicy);
-  if (recoveryHours !== null && recoveryHours < 14) {
-    return `Recovery period is ${recoveryHours} hours. Minimum required is 14 hours.`;
   }
 
   return null;
