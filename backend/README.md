@@ -7,7 +7,6 @@ Mend is a multi-tenant SaaS platform designed to improve workforce efficiency, e
 Core capabilities include:
 
 - Workforce attendance tracking with geofencing
-- 10:14 Human Efficiency Standard enforcement
 - Fatigue and wellbeing monitoring
 - SOS and safety alert system
 - Certification and compliance engine

@@ -14,6 +14,7 @@ import { ICourse, ILecture, IEnrollment, IAssessment, IAssessmentAttempt, ICerti
 import { IRoster } from "./roster";
 import { IGig, IBooking, IGigApplication, IGigFreelancerPreference } from "./gigs.d";
 import {IStorageProvider} from "./storage"
+import { ILeaveRequest, IDayOff } from "./leave.d"
 import { IReview, ReviewActor, CreateReviewInput, ResolvedReviewContext, ReviewListOptions, ReviewListFilters, HotelRatingSummary, HotelRatingSummaryBucket } from "./review"
 
 export {
@@ -24,6 +25,7 @@ export {
   IRoster,
   IGig, IBooking, IGigApplication, IGigFreelancerPreference,
   IStorageProvider,
+  ILeaveRequest, IDayOff,
   IReview, ReviewActor, CreateReviewInput, ResolvedReviewContext,
   ReviewListOptions, ReviewListFilters, HotelRatingSummary, HotelRatingSummaryBucket
 };

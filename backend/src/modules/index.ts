@@ -19,6 +19,7 @@ import analyticsRoutes     from './analytics/analytics.route';
 import wellbeingRoutes     from './wellbeing/wellbeing.route';
 import complianceRoutes    from './compliance/compliance.route';
 import ReviewRoutes from './review/review.route';
+import leaveRoutes from './leave/leave.route';
 
 const router = Router();
 
@@ -48,6 +49,7 @@ router.use('/recruitment', recruitmentRoutes);
 router.use('/roster',      rosterRoutes);
 router.use('/compliance',  complianceRoutes);
 router.use('/review',ReviewRoutes)
+router.use('/leave',       leaveRoutes);
 
 router.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok' });

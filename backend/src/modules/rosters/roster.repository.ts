@@ -11,6 +11,15 @@ export const RosterRepository = {
     return RosterModel.findOne({ hotelId, id });
   },
 
+  /** Looks up by Mongo `_id`, scoped to the hotel. (`findById` above matches the custom `id` field.) */
+  findByIdInHotel: (hotelId: string, rosterId: Types.ObjectId | string) => {
+    return RosterModel.findOne({ hotelId, _id: rosterId });
+  },
+
+  findByIdsInHotel: (hotelId: string, rosterIds: Types.ObjectId[]) => {
+    return RosterModel.find({ hotelId, _id: { $in: rosterIds } }).sort({ date: 1 });
+  },
+
   findAllByTenant: (hotelId: string) => {
     return RosterModel.find({ hotelId }).sort({ date: 1 }).populate("employees", "_id profile.firstName profile.lastName departmentRole");
   },
@@ -40,6 +49,14 @@ export const RosterRepository = {
     return RosterModel.updateMany(
       { hotelId, date },
       { $pull: { employees: { $in: employeeIds } } }
+    );
+  },
+
+  // Appends employees to a roster. The caller has already filtered out anyone who is on it.
+  addEmployees: (hotelId: string, rosterId: Types.ObjectId | string, employeeIds: Types.ObjectId[]) => {
+    return RosterModel.updateOne(
+      { hotelId, _id: rosterId },
+      { $push: { employees: { $each: employeeIds } } }
     );
   },
 
