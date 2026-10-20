@@ -7,7 +7,11 @@
  */
 
 import { Types } from "mongoose";
-import { LeaveRequestStatus } from "../../src/shared/enums/leave.enum";
+import {
+  LeaveRequestStatus,
+  LeaveReviewDecision,
+  LeaveReviewerRole,
+} from "../../src/shared/enums/leave.enum";
 import { UserRole, UserStatus } from "../../src/shared/enums/user";
 import { AuthRole } from "../../src/shared/enums/common";
 import type { LeaveRequestRepository } from "../../src/modules/leave/leave-request.repository";
@@ -69,6 +73,14 @@ export function createFakeWorld() {
         .filter((r) => sameId(r.hotelId, hotelId))
         .filter((r) => !f.userId || sameId(r.userId, f.userId))
         .filter((r) => !f.status || r.status === f.status)
+        .filter(
+          (r) =>
+            !f.pendingFor ||
+            (r.status !== LeaveRequestStatus.CANCELLED &&
+              (f.pendingFor === LeaveReviewerRole.HR
+                ? !r.hrReview
+                : !r.managerReview && (!r.reviewedBy || r.reviewedByRole === LeaveReviewerRole.HR))),
+        )
         .filter((r) => !f.type || r.type === f.type)
         .filter((r) => !(f.from && f.to) || (r.fromDate <= f.to && r.toDate >= f.from))
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -85,15 +97,63 @@ export function createFakeWorld() {
       Object.assign(doc, set, { updatedAt: new Date() });
       return { ...doc } as any;
     },
-    async revertApprovalToPending(hotelId, id) {
+    async saveReviewDecision(hotelId, id, role, review, approvalRosterIds, legacyManagerReview) {
       const doc = requests.find(
-        (r) => sameId(r._id, id) && sameId(r.hotelId, hotelId) && r.status === LeaveRequestStatus.APPROVED,
+        (r) =>
+          sameId(r._id, id) &&
+          sameId(r.hotelId, hotelId) &&
+          r.status !== LeaveRequestStatus.CANCELLED,
       );
       if (!doc) return null;
-      doc.status = LeaveRequestStatus.PENDING;
-      delete doc.reviewedBy;
-      delete doc.reviewedAt;
-      delete doc.reviewNote;
+
+      if (role === LeaveReviewerRole.HR) {
+        if (doc.hrReview) return null;
+        doc.hrReview = review;
+        doc.status = review.decision === LeaveReviewDecision.APPROVED
+          ? LeaveRequestStatus.APPROVED
+          : LeaveRequestStatus.REJECTED;
+        doc.reviewedBy = review.reviewedBy;
+        doc.reviewedAt = review.reviewedAt;
+        doc.reviewedByRole = role;
+        doc.reviewNote = review.note;
+        if (approvalRosterIds !== undefined) doc.approvalRosterIds = [...approvalRosterIds];
+        if (legacyManagerReview !== undefined) doc.managerReview = legacyManagerReview;
+      } else {
+        if (doc.managerReview) return null;
+        doc.managerReview = review;
+        if (!doc.hrReview) {
+          doc.status = review.decision === LeaveReviewDecision.APPROVED
+            ? LeaveRequestStatus.APPROVED
+            : LeaveRequestStatus.REJECTED;
+          doc.reviewedBy = review.reviewedBy;
+          doc.reviewedAt = review.reviewedAt;
+          doc.reviewedByRole = role;
+          doc.reviewNote = review.note;
+          if (approvalRosterIds !== undefined) doc.approvalRosterIds = [...approvalRosterIds];
+        }
+      }
+      doc.updatedAt = new Date();
+      return { ...doc } as any;
+    },
+    async undoReviewDecision(hotelId, id, role, decision, prior) {
+      const doc = requests.find((r) => sameId(r._id, id) && sameId(r.hotelId, hotelId));
+      const field = role === LeaveReviewerRole.HR ? "hrReview" : "managerReview";
+      const decisionStatus = decision === LeaveReviewDecision.APPROVED
+        ? LeaveRequestStatus.APPROVED
+        : LeaveRequestStatus.REJECTED;
+      if (!doc || doc[field]?.decision !== decision) return null;
+      if (role === LeaveReviewerRole.MANAGER && doc.hrReview) {
+        delete doc.managerReview;
+      } else {
+        if (doc.status !== decisionStatus) return null;
+        doc.status = prior.status;
+        for (const key of ["reviewedBy", "reviewedAt", "reviewedByRole", "reviewNote", "approvalRosterIds"] as const) {
+          if (prior[key] === undefined) delete doc[key];
+          else doc[key] = prior[key];
+        }
+        delete doc[field];
+      }
+      doc.updatedAt = new Date();
       return { ...doc } as any;
     },
     async deleteById(hotelId, id) {
@@ -170,20 +230,46 @@ export function createFakeWorld() {
     },
   };
 
-  /** Roster fake: `removeEmployeeFromRange` pulls the employee from matching rosters. `failNext` makes the next call throw. */
+  /** Roster fake used to test approval removal and HR-veto restoration. */
   const rosterRepo: LeaveRosterRepository & { failNext: boolean } = {
     failNext: false,
-    async removeEmployeeFromRange(hotelId, userId, from, to) {
+    async findEmployeeRosterIdsInRange(hotelId, userId, from, to) {
+      return rosters
+        .filter(
+          (roster) =>
+            sameId(roster.hotelId, hotelId) &&
+            roster.date >= from &&
+            roster.date <= to &&
+            roster.employees.some((id: unknown) => sameId(id, userId)),
+        )
+        .map((roster) => String(roster._id));
+    },
+    async removeEmployeeFromRosters(hotelId, userId, rosterIds) {
       if (rosterRepo.failNext) {
         rosterRepo.failNext = false;
         throw new Error("roster write failed");
       }
       let changed = 0;
       for (const roster of rosters) {
-        if (!sameId(roster.hotelId, hotelId) || roster.date < from || roster.date > to) continue;
+        if (!sameId(roster.hotelId, hotelId) || !rosterIds.some((id) => sameId(id, roster._id))) continue;
         const before = roster.employees.length;
         roster.employees = roster.employees.filter((id: unknown) => !sameId(id, userId));
         if (roster.employees.length !== before) changed++;
+      }
+      return changed;
+    },
+    async restoreEmployeeToRosters(hotelId, userId, rosterIds, from, to) {
+      let changed = 0;
+      for (const roster of rosters) {
+        if (
+          !sameId(roster.hotelId, hotelId) ||
+          !rosterIds.some((id) => sameId(id, roster._id)) ||
+          roster.date < from ||
+          roster.date > to
+        ) continue;
+        if (roster.employees.some((id: unknown) => sameId(id, userId))) continue;
+        roster.employees.push(new Types.ObjectId(userId));
+        changed++;
       }
       return changed;
     },

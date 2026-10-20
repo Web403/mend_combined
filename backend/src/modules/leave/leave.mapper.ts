@@ -3,12 +3,29 @@
 // Converts stored documents into the wire DTOs documented in LEAVE.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { DayOffDto, IDayOff, ILeaveRequest, LeaveEmployeeSummaryDto, LeaveRequestDto } from "../../shared/interfaces/leave.d";
+import {
+  DayOffDto,
+  IDayOff,
+  ILeaveRequest,
+  LeaveEmployeeSummaryDto,
+  LeaveRequestDto,
+  LeaveReviewDto,
+} from "../../shared/interfaces/leave.d";
 import { LeaveEmployeeRecord } from "./leave-employee.repository";
 import { toDateOnlyString } from "./leave.date";
 
 const toIso = (value: Date | null | undefined): string | null =>
   value ? new Date(value).toISOString() : null;
+
+const toReviewDto = (review: ILeaveRequest["managerReview"]): LeaveReviewDto | null =>
+  review
+    ? {
+        decision: review.decision,
+        reviewedBy: review.reviewedBy,
+        reviewedAt: toIso(review.reviewedAt) as string,
+        note: review.note ?? null,
+      }
+    : null;
 
 export function toEmployeeSummary(record: LeaveEmployeeRecord): LeaveEmployeeSummaryDto {
   return {
@@ -36,7 +53,10 @@ export function toLeaveRequestDto(
     reason: doc.reason,
     reviewedBy: doc.reviewedBy ?? null,
     reviewedAt: toIso(doc.reviewedAt),
+    reviewedByRole: doc.reviewedByRole ?? null,
     reviewNote: doc.reviewNote ?? null,
+    managerReview: toReviewDto(doc.managerReview),
+    hrReview: toReviewDto(doc.hrReview),
     cancelledAt: toIso(doc.cancelledAt),
     createdAt: toIso(doc.createdAt) as string,
     updatedAt: toIso(doc.updatedAt) as string,

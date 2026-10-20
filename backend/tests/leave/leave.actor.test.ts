@@ -2,10 +2,13 @@ import { AuthRole } from "../../src/shared/enums/common";
 import { UserRole } from "../../src/shared/enums/user";
 import {
   LeaveActor,
+  assertCanManageDayOffs,
   assertCanRequestLeave,
   assertCanReviewLeave,
+  canManageDayOffs,
   canRequestLeave,
   canReviewLeave,
+  getLeaveReviewerRole,
   resolveLeaveActor,
 } from "../../src/modules/leave/leave.actor";
 import { LeaveError } from "../../src/modules/leave/leave.error";
@@ -36,10 +39,20 @@ describe("role matrix", () => {
   it.each([
     [UserRole.MANAGER, true],
     [UserRole.ADMIN, true],
+    [UserRole.HR, true],
     [UserRole.EMPLOYEE, false],
-    [UserRole.HR, false],
   ])("role %s can review leave: %s", (role, expected) => {
     expect(canReviewLeave(actorWith([role]))).toBe(expected);
+  });
+
+  it("keeps HR in the higher-priority leave lane without granting manager-only off permissions", () => {
+    const hr = actorWith([UserRole.HR]);
+    expect(getLeaveReviewerRole(hr)).toBe("HR");
+    expect(canManageDayOffs(hr)).toBe(false);
+    expect(() => assertCanManageDayOffs(hr)).toThrow(
+      expect.objectContaining({ code: "LEAVE_APPROVER_FORBIDDEN" }),
+    );
+    expect(getLeaveReviewerRole(actorWith([UserRole.MANAGER]))).toBe("MANAGER");
   });
 
   it("the hotel-owner account can review but cannot request leave", () => {

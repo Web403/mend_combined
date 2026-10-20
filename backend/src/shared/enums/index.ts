@@ -4,7 +4,13 @@ import { MonthlyEvents, PrimaryPainPoint, PropertyType } from "./hotel"
 import { ShiftStatus } from "./shift"
 import { JobStatus, JobDepartment, EmploymentType, ApplicationStatus, CertificationLevel, GigStatus, BookingStatus, GigApplicationStatus, RateUnit } from "./recruitment"
 import { ReviewType, ReviewRelationship, RevieweeRef } from "./review"
-import { LeaveType, LeaveRequestStatus, DayOffType } from "./leave.enum"
+import {
+  LeaveType,
+  LeaveRequestStatus,
+  LeaveReviewDecision,
+  LeaveReviewerRole,
+  DayOffType,
+} from "./leave.enum"
 
 export {
   IdType, SortOrder, UserAvailability, UserProfession, UserStatus, UserRole,
@@ -13,5 +19,5 @@ export {
   JobStatus, JobDepartment, EmploymentType, ApplicationStatus, CertificationLevel,
   GigStatus, BookingStatus, GigApplicationStatus, RateUnit,
   ReviewType, ReviewRelationship, RevieweeRef,
-  LeaveType, LeaveRequestStatus, DayOffType
+  LeaveType, LeaveRequestStatus, LeaveReviewDecision, LeaveReviewerRole, DayOffType
 }

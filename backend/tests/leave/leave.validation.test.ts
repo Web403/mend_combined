@@ -1,4 +1,9 @@
-import { DayOffType, LeaveRequestStatus, LeaveType } from "../../src/shared/enums/leave.enum";
+import {
+  DayOffType,
+  LeaveRequestStatus,
+  LeaveReviewerRole,
+  LeaveType,
+} from "../../src/shared/enums/leave.enum";
 import {
   DAY_OFF_ASSIGN_MAX_CELLS,
   DAY_OFF_ASSIGN_MAX_EMPLOYEES,
@@ -201,10 +206,13 @@ describe("list query parsers", () => {
     expectCode(() => parseLeaveRequestListQuery({ to: "2026-10-01" }), "LEAVE_VALIDATION_FAILED");
   });
 
-  it("validates status and type filters against the enums", () => {
+  it("validates status, type and pending reviewer filters against the enums", () => {
     expect(parseLeaveRequestListQuery({ status: "REJECTED" }).status).toBe(LeaveRequestStatus.REJECTED);
+    expect(parseLeaveRequestListQuery({ pendingFor: "HR" }).pendingFor).toBe(LeaveReviewerRole.HR);
+    expect(parseLeaveRequestListQuery({ pendingFor: "MANAGER" }).pendingFor).toBe(LeaveReviewerRole.MANAGER);
     expectCode(() => parseLeaveRequestListQuery({ status: "DONE" }), "LEAVE_VALIDATION_FAILED");
     expectCode(() => parseLeaveRequestListQuery({ type: "PAID" }), "LEAVE_VALIDATION_FAILED");
+    expectCode(() => parseLeaveRequestListQuery({ pendingFor: "FINANCE" }), "LEAVE_VALIDATION_FAILED");
   });
 
   it("requires from and to for the manager off calendar", () => {

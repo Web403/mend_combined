@@ -21,7 +21,12 @@ import {
   LeaveEmployeeRepository,
   leaveEmployeeRepository,
 } from "./leave-employee.repository";
-import { LeaveActor, assertCanRequestLeave, assertCanReviewLeave, resolveReviewerId } from "./leave.actor";
+import {
+  LeaveActor,
+  assertCanManageDayOffs,
+  assertCanRequestLeave,
+  resolveReviewerId,
+} from "./leave.actor";
 import { enumerateDays, todayInBusinessTimezone, toDateOnlyString } from "./leave.date";
 import { LeaveErrors } from "./leave.error";
 import { toDayOffDto, toEmployeeSummary } from "./leave.mapper";
@@ -69,7 +74,7 @@ export class DayOffService {
   }
 
   async assignDayOffs(actor: LeaveActor, body: unknown): Promise<AssignDayOffsResult> {
-    assertCanReviewLeave(actor);
+    assertCanManageDayOffs(actor);
     const input = parseAssignDayOffs(body, this.today());
     const { hotelId } = actor;
 
@@ -152,7 +157,7 @@ export class DayOffService {
 
   /** Manager calendar view. Requires an explicit from/to window and supports pagination. */
   async listDayOffs(actor: LeaveActor, query: Record<string, unknown>) {
-    assertCanReviewLeave(actor);
+    assertCanManageDayOffs(actor);
     const filters = parseDayOffListQuery(query);
     const { items, total } = await this.deps.dayOffs.findPage(actor.hotelId, filters);
 
@@ -185,7 +190,7 @@ export class DayOffService {
   }
 
   async deleteDayOff(actor: LeaveActor, id: string): Promise<{ id: string; deleted: true }> {
-    assertCanReviewLeave(actor);
+    assertCanManageDayOffs(actor);
     const dayOffId = parseObjectIdString(id, "id");
 
     const existing = await this.deps.dayOffs.findByIdInHotel(actor.hotelId, dayOffId);

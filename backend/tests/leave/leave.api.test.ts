@@ -78,6 +78,7 @@ const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 let hotelA: any;
 let hotelB: any;
 let managerA: any;
+let hrA: any;
 let employeeA1: any;
 let employeeA2: any;
 let managerB: any;
@@ -93,6 +94,7 @@ beforeEach(() => {
   hotelA = makeHotel("Hotel Alpha");
   hotelB = makeHotel("Hotel Beta");
   managerA = makeUser(UserRole.MANAGER, hotelA);
+  hrA = makeUser(UserRole.HR, hotelA);
   employeeA1 = makeUser(UserRole.EMPLOYEE, hotelA, { profile: { firstName: "Ravi", lastName: "Kumar" } });
   employeeA2 = makeUser(UserRole.EMPLOYEE, hotelA, { profile: { firstName: "Meera", lastName: "Shah" } });
   managerB = makeUser(UserRole.MANAGER, hotelB);
@@ -227,6 +229,29 @@ describe("leave request lifecycle", () => {
     expect(res.body.data[0].employee).toBeTruthy();
   });
 
+  it("makes leave visible to HR and exposes the HR-pending review queue", async () => {
+    const created = await submit(tokenFor(employeeA1));
+    const id = created.body.data.id;
+    await request(app).patch(`${LEAVE}/requests/${id}/approve`).set(bearer(tokenFor(managerA))).send({});
+
+    const allForHr = await request(app).get(`${LEAVE}/requests`).set(bearer(tokenFor(hrA)));
+    expect(allForHr.status).toBe(200);
+    expect(allForHr.body.data).toHaveLength(1);
+    expect(allForHr.body.data[0].status).toBe("APPROVED");
+
+    const hrQueue = await request(app)
+      .get(`${LEAVE}/requests?pendingFor=HR`)
+      .set(bearer(tokenFor(hrA)));
+    expect(hrQueue.status).toBe(200);
+    expect(hrQueue.body.data.map((item: any) => item.id)).toContain(id);
+
+    const managerQueue = await request(app)
+      .get(`${LEAVE}/requests?pendingFor=MANAGER`)
+      .set(bearer(tokenFor(managerA)));
+    expect(managerQueue.status).toBe(200);
+    expect(managerQueue.body.data.map((item: any) => item.id)).not.toContain(id);
+  });
+
   it("rejects an out-of-range limit before querying", async () => {
     const res = await request(app).get(`${LEAVE}/requests?limit=500`).set(bearer(tokenFor(managerA)));
     expect(res.status).toBe(400);
@@ -257,6 +282,55 @@ describe("leave request lifecycle", () => {
     const again = await request(app).patch(`${LEAVE}/requests/${id}/approve`).set(bearer(tokenFor(managerA))).send({});
     expect(again.status).toBe(409);
     expect(again.body.meta.code).toBe("LEAVE_NOT_PENDING");
+  });
+
+  it("allows HR to veto a manager approval through the real API", async () => {
+    const created = await submit(tokenFor(employeeA1));
+    const id = created.body.data.id;
+    const manager = bearer(tokenFor(managerA));
+    const hr = bearer(tokenFor(hrA));
+
+    const managerApproval = await request(app)
+      .patch(`${LEAVE}/requests/${id}/approve`)
+      .set(manager)
+      .send({ note: "Manager approved" });
+    expect(managerApproval.status).toBe(200);
+    expect(managerApproval.body.data.status).toBe("APPROVED");
+    expect(managerApproval.body.data.managerReview.decision).toBe("APPROVED");
+
+    const hrRejection = await request(app)
+      .patch(`${LEAVE}/requests/${id}/reject`)
+      .set(hr)
+      .send({ note: "HR policy restriction" });
+    expect(hrRejection.status).toBe(200);
+    expect(hrRejection.body.data).toMatchObject({
+      status: "REJECTED",
+      reviewedBy: hrA._id.toString(),
+      reviewedByRole: "HR",
+      managerReview: { decision: "APPROVED" },
+      hrReview: { decision: "REJECTED", reviewedBy: hrA._id.toString() },
+    });
+  });
+
+  it("lets HR approve a request rejected by the manager", async () => {
+    const created = await submit(tokenFor(employeeA1));
+    const id = created.body.data.id;
+    const managerRejection = await request(app)
+      .patch(`${LEAVE}/requests/${id}/reject`)
+      .set(bearer(tokenFor(managerA)))
+      .send({ note: "No coverage" });
+    expect(managerRejection.body.data.status).toBe("REJECTED");
+
+    const hrApproval = await request(app)
+      .patch(`${LEAVE}/requests/${id}/approve`)
+      .set(bearer(tokenFor(hrA)))
+      .send({ note: "Exception approved" });
+    expect(hrApproval.status).toBe(200);
+    expect(hrApproval.body.data).toMatchObject({
+      status: "APPROVED",
+      managerReview: { decision: "REJECTED" },
+      hrReview: { decision: "APPROVED" },
+    });
   });
 
   it("requires a reason to reject, and records it when given", async () => {
@@ -321,6 +395,15 @@ describe("day offs over HTTP", () => {
     toDate: "2026-11-14",
     weekdays: [0],
   };
+
+  it("does not grant HR manager-only day-off scheduling permissions", async () => {
+    const res = await request(app)
+      .post(`${LEAVE}/offs`)
+      .set(bearer(tokenFor(hrA)))
+      .send({ ...sundayOffs, userIds: [employeeA1._id.toString()] });
+    expect(res.status).toBe(403);
+    expect(res.body.meta.code).toBe("LEAVE_APPROVER_FORBIDDEN");
+  });
 
   it("lets a manager assign weekly offs, skipping ones already scheduled", async () => {
     const body = { ...sundayOffs, userIds: [employeeA1._id.toString()] };
@@ -465,6 +548,34 @@ describe("no backdating over HTTP", () => {
 });
 
 describe("approval over HTTP removes the employee from rosters", () => {
+  it("restores the affected roster assignment when HR rejects an approved request", async () => {
+    const roster = rosterStore.insertRaw({
+      _id: new mongoose.Types.ObjectId(),
+      id: "RST_HR_VETO",
+      hotelId: hotelA._id,
+      date: new Date("2026-11-02T00:00:00.000Z"),
+      shiftId: new mongoose.Types.ObjectId(),
+      employees: [employeeA1._id],
+    });
+    const created = await submit(tokenFor(employeeA1));
+    const id = created.body.data.id;
+
+    const approved = await request(app)
+      .patch(`${LEAVE}/requests/${id}/approve`)
+      .set(bearer(tokenFor(managerA)))
+      .send({});
+    expect(approved.status).toBe(200);
+    expect(roster.employees).toHaveLength(0);
+
+    const rejected = await request(app)
+      .patch(`${LEAVE}/requests/${id}/reject`)
+      .set(bearer(tokenFor(hrA)))
+      .send({ note: "HR veto" });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.data.status).toBe("REJECTED");
+    expect(roster.employees.map((employee: any) => String(employee))).toEqual([employeeA1._id.toString()]);
+  });
+
   it("takes the employee off the rosters for the leave dates, over the real route", async () => {
     const id = (value: unknown) => String(value);
     const rosterFor = (date: string, employees: string[]) =>

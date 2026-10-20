@@ -50,14 +50,20 @@ export const LEAVE_REQUESTER_ROLES: readonly string[] = [
 ];
 
 /**
- * Roles that may review leave and manage offs for their hotel. The hotel owner
- * account (AuthRole.HOTEL) is always an approver for its own tenant.
- *
- * The data model has no reporting line between managers and employees, so an
- * approver's authority is tenant-wide. Narrowing it requires adding a
- * manager → reports relationship first.
+ * Roles that may review leave in their hotel. HR has its own review lane and
+ * its decision takes precedence over a manager/admin/hotel-owner decision.
+ * The data model has no reporting line between managers and employees, so a
+ * reviewer's scope is tenant-wide.
  */
 export const LEAVE_APPROVER_ROLES: readonly string[] = [
+  UserRole.MANAGER,
+  UserRole.ADMIN,
+  AuthRole.HOTEL,
+  UserRole.HR,
+];
+
+/** Roles that may assign, list, or remove scheduled offs. HR is not included. */
+export const DAY_OFF_MANAGER_ROLES: readonly string[] = [
   UserRole.MANAGER,
   UserRole.ADMIN,
   AuthRole.HOTEL,

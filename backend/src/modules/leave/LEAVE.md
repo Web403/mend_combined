@@ -8,7 +8,7 @@ This module covers two different things that look similar but behave differently
 |---|---|---|
 | What it is | An absence the **employee asks for**: date range, type, reason | A non-working day the **manager schedules** |
 | Who creates it | Employee | Manager / admin / hotel owner |
-| Approval | Required: `PENDING` → `APPROVED` / `REJECTED` | None; it takes effect when assigned |
+| Approval | Manager decisions take effect immediately; HR may override either decision | None; it takes effect when assigned |
 | Types | `CASUAL`, `SICK`, `EARNED`, `UNPAID`, `OTHER` | `WEEKLY_OFF`, `COMP_OFF`, `HOLIDAY` |
 | Effect on leave | Counts as leave days | Never counts as leave; removed from leave day counts |
 
@@ -16,13 +16,13 @@ This module covers two different things that look similar but behave differently
 
 ## Who can do what
 
-| Action | Employee (`EMPLOYEE`, `HR`) | Manager / Admin (`MANAGER`, `ADMIN`) | Hotel owner (`HOTEL`) | Gig worker (`STUDENT`, `PROFESSIONAL`) |
-|---|---|---|---|---|
-| Submit / list own / cancel own leave | Yes | Yes (managers can also be employees) | No | No (403) |
-| List all leave in the hotel | No | Yes | Yes | No |
-| Approve / reject | No | Yes, except their own requests | Yes | No |
-| Assign / list all / remove offs | No | Yes | Yes | No |
-| View own offs | Yes | Yes | No | No |
+| Action | Employee (`EMPLOYEE`) | HR (`HR`) | Manager / Admin (`MANAGER`, `ADMIN`) | Hotel owner (`HOTEL`) | Gig worker (`STUDENT`, `PROFESSIONAL`) |
+|---|---|---|---|---|---|
+| Submit / list own / cancel own leave | Yes | Yes | Yes (managers can also be employees) | No | No (403) |
+| List all leave in the hotel | No | Yes | Yes | Yes | No |
+| Approve / reject leave | No | Yes; HR decision has highest priority | Yes, except their own requests | Yes | No |
+| Assign / list all / remove offs | No | No (unless also manager/admin) | Yes | Yes | No |
+| View own offs | Yes | Yes | Yes | No | No |
 
 Rules that apply to everyone:
 
@@ -30,6 +30,7 @@ Rules that apply to everyone:
 - A request that belongs to another hotel returns **404**, not 403, so ids cannot be probed across tenants.
 - **Nobody reviews their own request.** Returns 403 `LEAVE_SELF_REVIEW_FORBIDDEN`.
 - Only **ACTIVE** staff can request leave or review. Suspended accounts are refused.
+- **HR has final authority.** A manager's approval or rejection takes effect immediately, but an HR approval or rejection overrides it. If HR votes first, a later manager vote is recorded for audit and cannot change the status. Each lane may decide once; an HR decision remains final.
 
 ## Conventions
 
@@ -43,15 +44,20 @@ Rules that apply to everyone:
 ## Lifecycle of a leave request
 
 ```
-PENDING ──approve──▶ APPROVED        (only if fromDate is not before today in IST)
-   │  ├──reject───▶ REJECTED         (note required)
-   │  └──cancel───▶ CANCELLED        (by employee)
-APPROVED ──cancel──▶ CANCELLED       (by employee, only if fromDate is after today in IST)
+PENDING ──manager approve──▶ APPROVED
+   │  ├──manager reject───▶ REJECTED
+   │  └──employee cancel──▶ CANCELLED
+
+PENDING / APPROVED / REJECTED ──HR approve──▶ APPROVED
+PENDING / APPROVED / REJECTED ──HR reject───▶ REJECTED
+APPROVED ──employee cancel──▶ CANCELLED  (only before the leave starts)
 ```
 
-**Nothing is backdated.** Leave cannot start before today (IST), and offs cannot be scheduled or removed for a past date. A pending request whose start date has passed can still be rejected or cancelled, but not approved.
+A manager's vote changes the status immediately. HR can later override either outcome: HR approval grants leave even after a manager rejection, while HR rejection declines leave even after a manager approval. When HR acts first, a later manager vote is retained in the response but does not change HR's outcome. `GET /leave/requests?pendingFor=HR` lists every request still awaiting HR, including manager-approved or manager-rejected requests; similarly use `pendingFor=MANAGER` for requests without a manager vote. Do not combine `pendingFor` with `status=PENDING` if the goal is to get the full lane queue.
 
-**Approval removes the employee from rosters.** Approving a leave takes the employee off every roster of the hotel that falls in the leave's date range. See "Rosters and leave" below.
+**Nothing is backdated.** Leave cannot start before today (IST), and offs cannot be scheduled or removed for a past date. An approval that would grant leave is refused if its start date has passed; a rejection may still be recorded.
+
+**Approval removes the employee from rosters.** Approving a leave takes the employee off the specific rosters they were assigned to in the leave's date range. If HR later vetoes a manager approval, those same roster assignments are restored. See "Rosters and leave" below.
 
 ## Endpoints
 
@@ -80,14 +86,16 @@ Response `data`: a **LeaveRequestDto** (see below).
 - Returns only the caller's requests.
 - Response: `data: LeaveRequestDto[]`, plus `meta` pagination.
 
-#### 3. List all leave requests — manager / admin / hotel owner
-`GET /leave/requests?status=&type=&userId=&from=&to=&page=&limit=`
+#### 3. List all leave requests — manager / HR / admin / hotel owner
+`GET /leave/requests?status=&pendingFor=&type=&userId=&from=&to=&page=&limit=`
 
-- `status` filters: `PENDING` to see the approval queue.
+- HR and managers can see every request in the hotel, whatever its effective status.
+- `status` filters by the effective request status (`PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`).
+- `pendingFor=HR|MANAGER` filters for non-cancelled requests that have not yet received a vote in that review lane. This is the recommended queue filter and may include requests whose effective `status` is already `APPROVED` or `REJECTED`.
 - `userId` narrows to one employee.
 - Response: `data: LeaveRequestDto[]` with `employee` names filled in, plus `meta` pagination.
 
-#### 4. Get one leave request — owner or manager
+#### 4. Get one leave request — owner, manager, or HR
 `GET /leave/requests/:id` → 200 · 404 `LEAVE_REQUEST_NOT_FOUND` if it doesn't exist or isn't visible to the caller.
 
 #### 5. Cancel my leave request — employee
@@ -95,21 +103,23 @@ Response `data`: a **LeaveRequestDto** (see below).
 
 Allowed when the request is `PENDING`, or `APPROVED` with `fromDate` later than today (IST). Otherwise 409 `LEAVE_NOT_CANCELLABLE`. Another employee's id returns 404.
 
-#### 6. Approve — manager / admin / hotel owner
+#### 6. Approve — manager / HR / admin / hotel owner
 `PATCH /leave/requests/:id/approve`
 
 Body (optional): `{ "note": "Covered by Deepak" }` (max 500 characters)
 
-Refused with 409 `LEAVE_START_DATE_PASSED` if `fromDate` is before today (IST). Reject it instead.
+Managers/admins/hotel owners record the manager-lane vote. HR records the HR-lane vote. The endpoint returns both votes; the request `status` reflects the effective result, with HR's vote taking precedence. The other lane may still vote once after the first decision.
 
-Re-checks overlaps at approval time. If two overlapping requests are approved at the same moment, the second one is rolled back to `PENDING` and gets 409 `LEAVE_OVERLAP`.
+An approval that would grant leave is refused with 409 `LEAVE_START_DATE_PASSED` if `fromDate` is before today (IST). Approval checks for overlapping approved leave both before and after the conditional update; a conflict is rolled back to the prior review state and returns 409 `LEAVE_OVERLAP`.
 
-After the status change, the employee is removed from every roster of the hotel with a date in `[fromDate, toDate]`. The roster write is not transactional, so if it fails the approval is rolled back to `PENDING` and the error is returned. Retrying is safe: removing an employee who is already off a roster changes nothing.
+When an approval takes effect, the employee is removed only from the rosters they were assigned to in the date range. If HR later rejects a manager-approved request, those assignments are restored. The roster write is not transactional; a failed roster update rolls the review back so it can be retried.
 
-#### 7. Reject — manager / admin / hotel owner
+#### 7. Reject — manager / HR / admin / hotel owner
 `PATCH /leave/requests/:id/reject`
 
 Body (**required**): `{ "note": "Two chefs already off that week" }` (1–500 characters)
+
+Managers and HR each get one vote per request. An HR rejection can change an already-approved request to `REJECTED`; an HR approval can change a manager-rejected request to `APPROVED`. A later manager vote cannot change an already-recorded HR outcome.
 
 ### Day offs
 
@@ -207,9 +217,22 @@ Errors from the roster module use the standard envelope with `meta.code`: 400 `I
   toDate: string;            // YYYY-MM-DD, inclusive
   leaveDays: number;         // working days in the range, excluding scheduled offs
   reason: string;
-  reviewedBy: string | null; // id of the approver (User or Hotel id)
+  reviewedBy: string | null; // id of the effective reviewer (HR when HR has voted)
   reviewedAt: string | null; // ISO timestamp
+  reviewedByRole: "MANAGER" | "HR" | null;
   reviewNote: string | null;
+  managerReview: {
+    decision: "APPROVED" | "REJECTED";
+    reviewedBy: string;
+    reviewedAt: string; // ISO timestamp
+    note: string | null;
+  } | null;
+  hrReview: {
+    decision: "APPROVED" | "REJECTED";
+    reviewedBy: string;
+    reviewedAt: string; // ISO timestamp
+    note: string | null;
+  } | null;
   cancelledAt: string | null;
   createdAt: string;         // ISO timestamp
   updatedAt: string;         // ISO timestamp
@@ -247,15 +270,15 @@ Errors from the roster module use the standard envelope with `meta.code`: 400 `I
 | 404 | `DAY_OFF_NOT_FOUND` | Off missing or in another hotel |
 | 404 | `EMPLOYEE_NOT_FOUND` | An employee in `userIds` is not in this hotel |
 | 409 | `LEAVE_OVERLAP` | Overlaps a pending or approved request |
-| 409 | `LEAVE_NOT_PENDING` | Already approved, rejected, or cancelled |
-| 409 | `LEAVE_START_DATE_PASSED` | Approving a pending leave whose start date has passed. Reject it instead |
+| 409 | `LEAVE_NOT_PENDING` | This reviewer lane already voted, or the request was cancelled |
+| 409 | `LEAVE_START_DATE_PASSED` | An approval that would grant leave was attempted after its start date |
 | 409 | `LEAVE_NOT_CANCELLABLE` | Rejected/cancelled, or approved and already started |
 | 409 | `LEAVE_CONCURRENT_UPDATE` | Changed by someone else at the same moment. Refresh and retry |
 | 409 | `DAY_OFF_CONCURRENT_UPDATE` | Schedule changed during assignment. Refresh and retry |
 
 ## Frontend notes
 
-- **Approval queue:** `GET /leave/requests?status=PENDING`. Use `meta.total` for the badge count.
+- **Manager queue:** `GET /leave/requests?pendingFor=MANAGER`. **HR queue:** `GET /leave/requests?pendingFor=HR`. Use `meta.total` for each lane's badge count; HR's queue can contain manager-approved or manager-rejected requests.
 - **Show the cancel button** only when `status === "PENDING"`, or `status === "APPROVED"` and `fromDate` is later than today in IST.
 - **Reject dialog:** make the note field required. The API rejects an empty note.
 - **Show `leaveDays`**, not the calendar length, as the number of days taken. `leaveDays` is recalculated when offs change.
@@ -271,4 +294,5 @@ Errors from the roster module use the standard envelope with `meta.code`: 400 `I
 - **Approver scope is the whole hotel.** The data model has no manager → employee reporting line, so every manager can review every employee in the hotel.
 - **Recording past sick leave needs a separate path.** Backdating is refused, so a sick day that has already passed cannot be entered as leave. A manager-recorded past absence needs a product decision and is not built.
 - **Permissions are by role.** These routes use role lists in `leave.constants.ts`, not the RBAC permission table.
-- **Race handling** uses conditional updates, a deterministic tie-break on submit, and a rollback on approve. It does not use multi-document transactions, so if the server crashes in the middle of a submit or approve, a rare inconsistency can persist. Submit can leave a duplicate `PENDING` request, and approve can leave two overlapping `APPROVED` requests. Managers can spot the second case in `GET /leave/requests?status=APPROVED` and reject one. Transactions would close this gap, but they need a replica set.
+- **Race handling** uses conditional writes and a deterministic tie-break on submit, but request and roster writes are not covered by a MongoDB transaction. A server crash between those writes can leave a rare inconsistency; retry the same-lane decision after checking the request and roster state.
+- **Pre-existing approvals have no roster snapshot.** New approvals store the roster ids needed to restore assignments after an HR veto. An already-approved legacy record created before this change has no such snapshot, so HR can change its status but the backend cannot reconstruct which prior roster assignments to restore.
