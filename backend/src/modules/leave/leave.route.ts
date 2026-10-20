@@ -7,10 +7,11 @@
 //   POST   /requests                  employee   submit a leave request
 //   GET    /requests/mine             employee   list own requests
 //   PATCH  /requests/:id/cancel       employee   withdraw own pending / not-yet-started approved leave
-//   GET    /requests                  manager    list all requests in the hotel (filterable)
-//   GET    /requests/:id              owner or manager
-//   PATCH  /requests/:id/approve      manager    approve a pending request
-//   PATCH  /requests/:id/reject       manager    reject a pending request (note required)
+//   GET    /requests                  manager/HR list all requests in the hotel (filterable)
+//   GET    /requests/:id              owner, manager, or HR
+//   PATCH  /requests/:id/approve      manager/HR record an approval vote
+//   PATCH  /requests/:id/reject       manager/HR record a rejection vote (note required)
+// HR may override a manager's decision; the manager and HR votes are stored separately.
 //
 // Day offs (manager-scheduled non-working days)
 //   POST   /offs                      manager    assign offs to one or many employees

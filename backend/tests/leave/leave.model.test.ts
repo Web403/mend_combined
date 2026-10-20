@@ -8,7 +8,13 @@
 import { Types } from "mongoose";
 import { LeaveRequestModel } from "../../src/modules/leave/leave-request.model";
 import { DayOffModel } from "../../src/modules/leave/day-off.model";
-import { LeaveRequestStatus, LeaveType, DayOffType } from "../../src/shared/enums/leave.enum";
+import {
+  LeaveRequestStatus,
+  LeaveReviewDecision,
+  LeaveReviewerRole,
+  LeaveType,
+  DayOffType,
+} from "../../src/shared/enums/leave.enum";
 import { MAX_REASON_LENGTH, MAX_DAY_OFF_NOTE_LENGTH } from "../../src/modules/leave/leave.constants";
 
 const id = () => new Types.ObjectId();
@@ -39,6 +45,26 @@ describe("LeaveRequestModel", () => {
     expect(doc.status).toBe(LeaveRequestStatus.PENDING);
   });
 
+  it("stores independent manager and HR reviews with an HR effective reviewer", () => {
+    const doc = new LeaveRequestModel(leaveDoc({
+      managerReview: {
+        decision: LeaveReviewDecision.APPROVED,
+        reviewedBy: "manager-id",
+        reviewedAt: new Date("2026-10-18T06:00:00Z"),
+        note: "Manager approved",
+      },
+      hrReview: {
+        decision: LeaveReviewDecision.REJECTED,
+        reviewedBy: "hr-id",
+        reviewedAt: new Date("2026-10-19T06:00:00Z"),
+        note: "HR veto",
+      },
+      status: LeaveRequestStatus.REJECTED,
+      reviewedByRole: LeaveReviewerRole.HR,
+    }));
+    expect(doc.validateSync()).toBeUndefined();
+  });
+
   it("rejects an unknown leave type", () => {
     const err = new LeaveRequestModel(leaveDoc({ type: "VACATION" })).validateSync();
     expect(err?.errors.type).toBeDefined();
@@ -62,7 +88,7 @@ describe("LeaveRequestModel", () => {
   });
 
   it("declares the indexes that the overlap and inbox queries rely on", () => {
-    const indexes = LeaveRequestModel.schema.indexes().map(([fields]: [Record<string, unknown>]) => Object.keys(fields).join(","));
+    const indexes = LeaveRequestModel.schema.indexes().map((index: any) => Object.keys(index[0]).join(","));
     expect(indexes).toEqual(
       expect.arrayContaining([
         "hotelId,userId,status,fromDate,toDate",
@@ -89,8 +115,8 @@ describe("DayOffModel", () => {
   });
 
   it("enforces one off per employee per day through a unique index", () => {
-    const unique = DayOffModel.schema.indexes().find(([fields]: [Record<string, unknown>]) =>
-      Object.keys(fields).join(",") === "hotelId,userId,date",
+    const unique = DayOffModel.schema.indexes().find((index: any) =>
+      Object.keys(index[0]).join(",") === "hotelId,userId,date",
     );
     expect(unique).toBeDefined();
     expect(unique![1]).toMatchObject({ unique: true });

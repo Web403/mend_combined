@@ -54,7 +54,7 @@ export const LeaveErrors = {
   approverForbidden: () =>
     new LeaveError(
       "LEAVE_APPROVER_FORBIDDEN",
-      "Only managers and administrators can review leave or manage offs",
+      "Your role cannot perform this leave review or day-off action",
       403,
     ),
   inactiveEmployee: () =>
@@ -86,7 +86,7 @@ export const LeaveErrors = {
   notPending: (status: string) =>
     new LeaveError(
       "LEAVE_NOT_PENDING",
-      `Only pending leave requests can be reviewed (current status: ${status})`,
+      `This review lane has already decided or can no longer act on the request (current status: ${status})`,
       409,
     ),
   startDatePassed: () =>

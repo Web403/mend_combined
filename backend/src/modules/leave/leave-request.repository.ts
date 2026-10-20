@@ -1,14 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // modules/leave/leave-request.repository.ts
 //
-// Database access for leave requests. Every query is scoped by `hotelId`, and
-// status transitions are conditional updates, so two managers acting on the
-// same request cannot both succeed.
+// Database access for leave requests. Every query is scoped by `hotelId`.
+// Manager and HR votes are independent; conditional updates make each lane
+// single-write, and HR's vote always controls the effective request status.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { QueryFilter, Types } from "mongoose";
-import { ILeaveRequest } from "../../shared/interfaces/leave.d";
-import { LeaveRequestStatus } from "../../shared/enums/leave.enum";
+import { ILeaveRequest, ILeaveReview } from "../../shared/interfaces/leave.d";
+import {
+  LeaveRequestStatus,
+  LeaveReviewDecision,
+  LeaveReviewerRole,
+} from "../../shared/enums/leave.enum";
 import { LeaveRequestModel } from "./leave-request.model";
 import { LeaveRequestListFilters } from "./leave.validation";
 
@@ -16,6 +20,12 @@ import { LeaveRequestListFilters } from "./leave.validation";
 export const LIVE_LEAVE_STATUSES: readonly LeaveRequestStatus[] = [
   LeaveRequestStatus.PENDING,
   LeaveRequestStatus.APPROVED,
+];
+
+const REVIEWABLE_STATUSES: readonly LeaveRequestStatus[] = [
+  LeaveRequestStatus.PENDING,
+  LeaveRequestStatus.APPROVED,
+  LeaveRequestStatus.REJECTED,
 ];
 
 export interface OverlapQuery {
@@ -44,16 +54,61 @@ export interface LeaveRequestRepository {
     hotelId: string,
     filters: LeaveRequestListFilters,
   ): Promise<{ items: ILeaveRequest[]; total: number }>;
-  /** Moves a request to `set.status` only if it is still in `fromStatus`. */
+  /** Moves an employee-owned request to CANCELLED only while its observed status is unchanged. */
   transitionFromStatus(
     hotelId: string,
     id: string,
     fromStatus: LeaveRequestStatus,
     set: Partial<ILeaveRequest>,
   ): Promise<ILeaveRequest | null>;
-  /** Undoes an approval, clearing the review fields. Used when a conflict is detected after approving. */
-  revertApprovalToPending(hotelId: string, id: string): Promise<ILeaveRequest | null>;
+  /** Atomically records one role's vote. HR's vote takes precedence over manager votes. */
+  saveReviewDecision(
+    hotelId: string,
+    id: string,
+    role: LeaveReviewerRole,
+    review: ILeaveReview,
+    approvalRosterIds?: string[],
+    legacyManagerReview?: ILeaveReview,
+  ): Promise<ILeaveRequest | null>;
+  /** Compensates a failed post-decision roster write by restoring the pre-decision review state. */
+  undoReviewDecision(
+    hotelId: string,
+    id: string,
+    role: LeaveReviewerRole,
+    decision: LeaveReviewDecision,
+    prior: ILeaveRequest,
+  ): Promise<ILeaveRequest | null>;
   deleteById(hotelId: string, id: string): Promise<void>;
+}
+
+const statusForDecision = (decision: LeaveReviewDecision): LeaveRequestStatus =>
+  decision === LeaveReviewDecision.APPROVED
+    ? LeaveRequestStatus.APPROVED
+    : LeaveRequestStatus.REJECTED;
+
+function effectiveReviewFields(review: ILeaveReview, role: LeaveReviewerRole) {
+  return {
+    reviewedBy: review.reviewedBy,
+    reviewedAt: review.reviewedAt,
+    reviewedByRole: role,
+    reviewNote: review.note ?? null,
+  };
+}
+
+/** Creates an update restoring the externally visible fields from the prior snapshot. */
+function restorePriorState(prior: ILeaveRequest, unsetReviewField: "managerReview" | "hrReview") {
+  const $set: Record<string, unknown> = { status: prior.status };
+  const $unset: Record<string, 1> = { [unsetReviewField]: 1 };
+  const legacyFields = ["reviewedBy", "reviewedAt", "reviewedByRole", "reviewNote"] as const;
+
+  for (const field of legacyFields) {
+    if (prior[field] === undefined) $unset[field] = 1;
+    else $set[field] = prior[field];
+  }
+  if (prior.approvalRosterIds === undefined) $unset.approvalRosterIds = 1;
+  else $set.approvalRosterIds = prior.approvalRosterIds;
+
+  return { $set, $unset };
 }
 
 export const leaveRequestRepository: LeaveRequestRepository = {
@@ -97,6 +152,24 @@ export const leaveRequestRepository: LeaveRequestRepository = {
     if (filters.userId) filter.userId = new Types.ObjectId(filters.userId);
     if (filters.status) filter.status = filters.status;
     if (filters.type) filter.type = filters.type;
+    if (filters.pendingFor) {
+      if (filters.status === LeaveRequestStatus.CANCELLED) return { items: [], total: 0 };
+      if (!filters.status) filter.status = { $in: [...REVIEWABLE_STATUSES] };
+
+      if (filters.pendingFor === LeaveReviewerRole.HR) {
+        filter["hrReview.decision"] = { $exists: false };
+      } else {
+        filter["managerReview.decision"] = { $exists: false };
+        // Legacy requests recorded their manager vote only in the flat effective
+        // fields. Keep those out of the manager queue, while HR-first decisions
+        // (reviewedByRole=HR) remain available to a manager who has not voted.
+        filter.$or = [
+          { reviewedBy: { $exists: false } },
+          { reviewedBy: null },
+          { reviewedByRole: LeaveReviewerRole.HR },
+        ];
+      }
+    }
     if (filters.from && filters.to) {
       filter.fromDate = { $lte: filters.to };
       filter.toDate = { $gte: filters.from };
@@ -121,13 +194,93 @@ export const leaveRequestRepository: LeaveRequestRepository = {
     ).lean<ILeaveRequest>();
   },
 
-  async revertApprovalToPending(hotelId, id) {
-    return LeaveRequestModel.findOneAndUpdate(
-      { _id: id, hotelId, status: LeaveRequestStatus.APPROVED },
+  async saveReviewDecision(hotelId, id, role, review, approvalRosterIds, legacyManagerReview) {
+    const baseFilter: QueryFilter<ILeaveRequest> = {
+      _id: id,
+      hotelId,
+      status: { $in: [...REVIEWABLE_STATUSES] },
+    };
+
+    if (role === LeaveReviewerRole.HR) {
+      const $set: Record<string, unknown> = {
+        hrReview: review,
+        status: statusForDecision(review.decision),
+        ...effectiveReviewFields(review, LeaveReviewerRole.HR),
+      };
+      if (approvalRosterIds !== undefined) $set.approvalRosterIds = approvalRosterIds;
+      if (legacyManagerReview !== undefined) $set.managerReview = legacyManagerReview;
+      return LeaveRequestModel.findOneAndUpdate(
+        { ...baseFilter, "hrReview.decision": { $exists: false } },
+        { $set },
+        { new: true },
+      ).lean<ILeaveRequest>();
+    }
+
+    // A manager's vote sets the effective status only until HR has voted. The
+    // two filters make that precedence atomic even if manager and HR act together.
+    const managerSet: Record<string, unknown> = { managerReview: review };
+    if (approvalRosterIds !== undefined) managerSet.approvalRosterIds = approvalRosterIds;
+    const effectiveManagerSet = {
+      ...managerSet,
+      status: statusForDecision(review.decision),
+      ...effectiveReviewFields(review, LeaveReviewerRole.MANAGER),
+    };
+
+    const withoutHrDecision = await LeaveRequestModel.findOneAndUpdate(
       {
-        $set: { status: LeaveRequestStatus.PENDING },
-        $unset: { reviewedBy: 1, reviewedAt: 1, reviewNote: 1 },
+        ...baseFilter,
+        "managerReview.decision": { $exists: false },
+        "hrReview.decision": { $exists: false },
       },
+      { $set: effectiveManagerSet },
+      { new: true },
+    ).lean<ILeaveRequest>();
+    if (withoutHrDecision) return withoutHrDecision;
+
+    // HR already decided. Keep its status and legacy effective-review fields;
+    // still retain the manager vote for the audit trail.
+    return LeaveRequestModel.findOneAndUpdate(
+      {
+        ...baseFilter,
+        "managerReview.decision": { $exists: false },
+        "hrReview.decision": { $exists: true },
+      },
+      { $set: { managerReview: review } },
+      { new: true },
+    ).lean<ILeaveRequest>();
+  },
+
+  async undoReviewDecision(hotelId, id, role, decision, prior) {
+    const baseFilter: QueryFilter<ILeaveRequest> = {
+      _id: id,
+      hotelId,
+      [`${role === LeaveReviewerRole.HR ? "hrReview" : "managerReview"}.decision`]: decision,
+    };
+
+    if (role === LeaveReviewerRole.MANAGER) {
+      // If HR decided after the manager vote, undo only the manager's lane and
+      // never overwrite HR's higher-priority outcome.
+      const withHrDecision = await LeaveRequestModel.findOneAndUpdate(
+        { ...baseFilter, "hrReview.decision": { $exists: true } },
+        { $unset: { managerReview: 1 } },
+        { new: true },
+      ).lean<ILeaveRequest>();
+      if (withHrDecision) return withHrDecision;
+
+      return LeaveRequestModel.findOneAndUpdate(
+        {
+          ...baseFilter,
+          "hrReview.decision": { $exists: false },
+          status: statusForDecision(decision),
+        },
+        restorePriorState(prior, "managerReview"),
+        { new: true },
+      ).lean<ILeaveRequest>();
+    }
+
+    return LeaveRequestModel.findOneAndUpdate(
+      { ...baseFilter, status: statusForDecision(decision) },
+      restorePriorState(prior, "hrReview"),
       { new: true },
     ).lean<ILeaveRequest>();
   },

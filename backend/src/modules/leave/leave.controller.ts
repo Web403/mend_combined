@@ -76,7 +76,7 @@ export class LeaveRequestController {
   async approveRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await requestService.approveRequest(getLeaveActor(req), idParam(req), req.body);
-      res.json(successResponse(result, "Leave request approved"));
+      res.json(successResponse(result, "Leave approval decision recorded"));
     } catch (err) {
       fail(err, res, next);
     }
@@ -85,7 +85,7 @@ export class LeaveRequestController {
   async rejectRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await requestService.rejectRequest(getLeaveActor(req), idParam(req), req.body);
-      res.json(successResponse(result, "Leave request rejected"));
+      res.json(successResponse(result, "Leave rejection decision recorded"));
     } catch (err) {
       fail(err, res, next);
     }

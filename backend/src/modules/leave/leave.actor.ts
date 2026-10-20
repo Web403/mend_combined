@@ -12,8 +12,14 @@ import { NextFunction, Request, Response } from "express";
 import { AuthenticatedRequest } from "../../core/middleware/auth.middleware";
 import { errorResponse } from "../../core/utils/ApiResponse";
 import { AuthRole } from "../../shared/enums/common";
+import { UserRole } from "../../shared/enums/user";
 import { LeaveError, LeaveErrors } from "./leave.error";
-import { LEAVE_APPROVER_ROLES, LEAVE_REQUESTER_ROLES } from "./leave.constants";
+import {
+  DAY_OFF_MANAGER_ROLES,
+  LEAVE_APPROVER_ROLES,
+  LEAVE_REQUESTER_ROLES,
+} from "./leave.constants";
+import { LeaveReviewerRole } from "../../shared/enums/leave.enum";
 
 export interface LeaveActor {
   /** `USER` for staff accounts; `HOTEL` for the hotel-owner account. */
@@ -88,12 +94,28 @@ export function canRequestLeave(actor: LeaveActor): boolean {
   );
 }
 
-/** Managers, admins and the hotel-owner account. */
+/** Managers, HR, admins and the hotel-owner account may review leave requests. */
 export function canReviewLeave(actor: LeaveActor): boolean {
   return (
     actor.kind === "HOTEL" ||
     actor.roles.some((role) => LEAVE_APPROVER_ROLES.includes(role))
   );
+}
+
+/** Only managers/admins and the hotel owner may manage scheduled offs. */
+export function canManageDayOffs(actor: LeaveActor): boolean {
+  return (
+    actor.kind === "HOTEL" ||
+    actor.roles.some((role) => DAY_OFF_MANAGER_ROLES.includes(role))
+  );
+}
+
+/** HR is the higher-priority reviewer when an account has both role claims. */
+export function getLeaveReviewerRole(actor: LeaveActor): LeaveReviewerRole {
+  if (actor.kind === "USER" && actor.roles.includes(UserRole.HR)) {
+    return LeaveReviewerRole.HR;
+  }
+  return LeaveReviewerRole.MANAGER;
 }
 
 export function assertCanRequestLeave(actor: LeaveActor): void {
@@ -104,10 +126,14 @@ export function assertCanReviewLeave(actor: LeaveActor): void {
   if (!canReviewLeave(actor)) throw LeaveErrors.approverForbidden();
 }
 
+export function assertCanManageDayOffs(actor: LeaveActor): void {
+  if (!canManageDayOffs(actor)) throw LeaveErrors.approverForbidden();
+}
+
 /**
  * The User._id recorded as the reviewer of a decision. Hotel-owner accounts
  * review as the hotel itself. Staff reviewers must still be ACTIVE in this hotel,
- * so a suspended manager cannot keep approving on an old token.
+ * so a suspended manager or HR reviewer cannot keep acting on an old token.
  */
 export async function resolveReviewerId(
   actor: LeaveActor,

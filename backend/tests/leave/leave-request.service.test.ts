@@ -1,6 +1,12 @@
 import { Types } from "mongoose";
 import { LeaveRequestService } from "../../src/modules/leave/leave-request.service";
-import { LeaveRequestStatus, LeaveType, DayOffType } from "../../src/shared/enums/leave.enum";
+import {
+  LeaveRequestStatus,
+  LeaveReviewDecision,
+  LeaveReviewerRole,
+  LeaveType,
+  DayOffType,
+} from "../../src/shared/enums/leave.enum";
 import { UserRole, UserStatus } from "../../src/shared/enums/user";
 import { LeaveError } from "../../src/modules/leave/leave.error";
 import { clock, createFakeWorld, d, ownerActor, userActor } from "./leave.fakes";
@@ -222,6 +228,107 @@ describe("LeaveRequestService — reviewing", () => {
     expect(rejected.reviewNote).toBe("Two staff already off that week");
   });
 
+  it("lets HR approve a manager-rejected request, and HR's approval becomes effective", async () => {
+    const { service, emp1, manager, world } = setup();
+    const hr = world.addEmployee(HOTEL, { role: UserRole.HR, first: "Hema", last: "Rao" });
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+
+    const managerDecision = await service.rejectRequest(
+      userActor(HOTEL, manager, [UserRole.MANAGER]),
+      req.id,
+      { note: "Coverage unavailable" },
+    );
+    expect(managerDecision.status).toBe(LeaveRequestStatus.REJECTED);
+
+    const hrDecision = await service.approveRequest(userActor(HOTEL, hr, [UserRole.HR]), req.id, {
+      note: "Approved by HR",
+    });
+    expect(hrDecision.status).toBe(LeaveRequestStatus.APPROVED);
+    expect(hrDecision.managerReview).toMatchObject({ decision: LeaveReviewDecision.REJECTED });
+    expect(hrDecision.hrReview).toMatchObject({ decision: LeaveReviewDecision.APPROVED, reviewedBy: hr });
+    expect(hrDecision.reviewedBy).toBe(hr);
+    expect(world.requests[0].status).toBe(LeaveRequestStatus.APPROVED);
+  });
+
+  it("preserves legacy manager decisions when HR overrides a pre-hierarchy request", async () => {
+    const { service, emp1, manager, world } = setup();
+    const hr = world.addEmployee(HOTEL, { role: UserRole.HR });
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+    const legacy = world.requests[0];
+    legacy.status = LeaveRequestStatus.APPROVED;
+    legacy.reviewedBy = manager;
+    legacy.reviewedAt = clock();
+    legacy.reviewNote = "Legacy manager approval";
+    delete legacy.managerReview;
+    delete legacy.reviewedByRole;
+
+    const managerQueueBefore = await service.listRequests(
+      userActor(HOTEL, manager, [UserRole.MANAGER]),
+      { pendingFor: "MANAGER" },
+    );
+    expect(managerQueueBefore.items).toHaveLength(0);
+
+    const hrDecision = await service.rejectRequest(
+      userActor(HOTEL, hr, [UserRole.HR]),
+      req.id,
+      { note: "HR veto" },
+    );
+    expect(hrDecision.status).toBe(LeaveRequestStatus.REJECTED);
+    expect(hrDecision.managerReview).toMatchObject({
+      decision: LeaveReviewDecision.APPROVED,
+      reviewedBy: manager,
+      note: "Legacy manager approval",
+    });
+    const managerQueueAfter = await service.listRequests(
+      userActor(HOTEL, manager, [UserRole.MANAGER]),
+      { pendingFor: "MANAGER" },
+    );
+    expect(managerQueueAfter.items).toHaveLength(0);
+    await expectLeaveError(
+      service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {}),
+      "LEAVE_NOT_PENDING",
+    );
+  });
+
+  it("lets HR veto a manager approval and restores only rosters removed by that approval", async () => {
+    const { service, emp1, emp2, manager, world } = setup();
+    const hr = world.addEmployee(HOTEL, { role: UserRole.HR });
+    const targetRoster = world.addRoster(HOTEL, "2026-11-02", [emp1, emp2]);
+    const unrelatedRoster = world.addRoster(HOTEL, "2026-11-03", [emp2]);
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+
+    await service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {});
+    expect(targetRoster.employees.map(String)).toEqual([emp2]);
+
+    const declined = await service.rejectRequest(userActor(HOTEL, hr, [UserRole.HR]), req.id, {
+      note: "HR policy restriction",
+    });
+    expect(declined.status).toBe(LeaveRequestStatus.REJECTED);
+    expect(declined.managerReview).toMatchObject({ decision: LeaveReviewDecision.APPROVED });
+    expect(declined.hrReview).toMatchObject({ decision: LeaveReviewDecision.REJECTED, reviewedBy: hr });
+    expect(declined.reviewedByRole).toBe(LeaveReviewerRole.HR);
+    expect(targetRoster.employees.map(String).sort()).toEqual([emp1, emp2].sort());
+    expect(unrelatedRoster.employees.map(String)).toEqual([emp2]);
+    await expectLeaveError(
+      service.approveRequest(userActor(HOTEL, hr, [UserRole.HR]), req.id, {}),
+      "LEAVE_NOT_PENDING",
+    );
+  });
+
+  it("keeps HR's earlier rejection effective when a manager later approves", async () => {
+    const { service, emp1, manager, world } = setup();
+    const hr = world.addEmployee(HOTEL, { role: UserRole.HR });
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+
+    await service.rejectRequest(userActor(HOTEL, hr, [UserRole.HR]), req.id, { note: "Policy limit" });
+    const managerVote = await service.approveRequest(userActor(HOTEL, manager, [UserRole.MANAGER]), req.id, {});
+
+    expect(managerVote.status).toBe(LeaveRequestStatus.REJECTED);
+    expect(managerVote.managerReview?.decision).toBe(LeaveReviewDecision.APPROVED);
+    expect(managerVote.hrReview?.decision).toBe(LeaveReviewDecision.REJECTED);
+    expect(managerVote.reviewedByRole).toBe(LeaveReviewerRole.HR);
+  });
+
   it("requires a note to reject", async () => {
     const { service, emp1, manager } = setup();
     const req = await service.createRequest(userActor(HOTEL, emp1), leave());
@@ -419,6 +526,36 @@ describe("LeaveRequestService — reading and tenant isolation", () => {
 
     const approved = await service.listRequests(actor, { status: "APPROVED" });
     expect(approved.items.map((i) => i.id)).toEqual([a.id]);
+  });
+
+  it("lists each reviewer lane's outstanding reviews even when the other lane changed status", async () => {
+    const { service, emp1, manager, world } = setup();
+    const hr = world.addEmployee(HOTEL, { role: UserRole.HR });
+    const managerActor = userActor(HOTEL, manager, [UserRole.MANAGER]);
+    const hrActor = userActor(HOTEL, hr, [UserRole.HR]);
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+    await service.approveRequest(managerActor, req.id, {});
+
+    const pendingForHr = await service.listRequests(hrActor, { pendingFor: "HR" });
+    expect(pendingForHr.items).toHaveLength(1);
+    expect(pendingForHr.items[0]).toMatchObject({ id: req.id, status: LeaveRequestStatus.APPROVED });
+    expect((await service.listRequests(managerActor, { pendingFor: "MANAGER" })).items).toHaveLength(0);
+
+    await service.rejectRequest(hrActor, req.id, { note: "HR veto" });
+    expect((await service.listRequests(hrActor, { pendingFor: "HR" })).items).toHaveLength(0);
+  });
+
+  it("excludes cancelled requests from both reviewer queues", async () => {
+    const { service, emp1 } = setup();
+    const req = await service.createRequest(userActor(HOTEL, emp1), leave());
+    await service.cancelRequest(userActor(HOTEL, emp1), req.id);
+
+    const hrQueue = await service.listRequests(ownerActor(HOTEL), { pendingFor: "HR" });
+    const managerQueue = await service.listRequests(ownerActor(HOTEL), { pendingFor: "MANAGER" });
+    expect(hrQueue.items).toHaveLength(0);
+    expect(managerQueue.items).toHaveLength(0);
+    expect((await service.listRequests(ownerActor(HOTEL), { status: "CANCELLED", pendingFor: "HR" })).items)
+      .toHaveLength(0);
   });
 
   it("returns only the caller's own requests from listMyRequests, ignoring any userId in the query", async () => {

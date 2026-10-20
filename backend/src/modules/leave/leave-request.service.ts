@@ -1,12 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // modules/leave/leave-request.service.ts
 //
-// Business rules for employee leave requests and manager decisions.
+// Business rules for employee leave requests and manager/HR decisions.
+// Manager decisions take effect immediately, but HR may later override them.
+// If HR reviews first, the manager's later vote is retained for audit only.
 //
-//   PENDING ──approve──▶ APPROVED
-//      │  ├──reject───▶ REJECTED
-//      │  └──cancel───▶ CANCELLED
-//   APPROVED ──cancel (only if the leave has not started yet)──▶ CANCELLED
+//   PENDING ──manager approve/reject──▶ APPROVED / REJECTED
+//   PENDING / APPROVED / REJECTED ──HR approve/reject──▶ APPROVED / REJECTED
+//   PENDING or future APPROVED ──employee cancel──▶ CANCELLED
 //
 // Invariants:
 //   0. Nothing is backdated. A request cannot start before today, and a pending
@@ -17,13 +18,18 @@
 //   2. Scheduled offs are not leave. Leave days are the inclusive days in the
 //      range minus the employee's offs, and a range that is entirely offs is rejected.
 //   3. Nobody reviews their own request.
-//   4. Every status change is a conditional update from the status that was read.
-//   5. Approval takes the employee off every roster in the leave's date range.
+//   4. Each review lane may vote once; HR's vote controls the effective status.
+//   5. Effective approval removes the employee from affected rosters, and an HR
+//      veto restores the captured roster assignments.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Types } from "mongoose";
-import { ILeaveRequest, LeaveRequestDto } from "../../shared/interfaces/leave.d";
-import { LeaveRequestStatus } from "../../shared/enums/leave.enum";
+import { ILeaveRequest, ILeaveReview, LeaveRequestDto } from "../../shared/interfaces/leave.d";
+import {
+  LeaveRequestStatus,
+  LeaveReviewDecision,
+  LeaveReviewerRole,
+} from "../../shared/enums/leave.enum";
 import { logger } from "../../core/utils/logger";
 import { DayOffRepository, dayOffRepository } from "./day-off.repository";
 import { LeaveRosterRepository, leaveRosterRepository } from "./leave-roster.repository";
@@ -40,6 +46,7 @@ import {
   assertCanRequestLeave,
   assertCanReviewLeave,
   canReviewLeave,
+  getLeaveReviewerRole,
   resolveReviewerId,
 } from "./leave.actor";
 import { todayInBusinessTimezone, enumerateDays, toDateOnlyString } from "./leave.date";
@@ -58,7 +65,10 @@ export interface LeaveRequestServiceDeps {
   requests: LeaveRequestRepository;
   dayOffs: Pick<DayOffRepository, "findByUsersInRange">;
   employees: LeaveEmployeeRepository;
-  roster: Pick<LeaveRosterRepository, "removeEmployeeFromRange">;
+  roster: Pick<
+    LeaveRosterRepository,
+    "findEmployeeRosterIdsInRange" | "removeEmployeeFromRosters" | "restoreEmployeeToRosters"
+  >;
   clock: () => Date;
 }
 
@@ -195,100 +205,206 @@ export class LeaveRequestService {
     return this.toDetail(actor.hotelId, doc, offs);
   }
 
-  // ── Manager decisions ──────────────────────────────────────────────────────
+  // ── Manager and HR decisions ────────────────────────────────────────────────
 
   async approveRequest(actor: LeaveActor, id: string, body: unknown): Promise<LeaveRequestDto> {
     assertCanReviewLeave(actor);
     const { note } = parseReviewDecision(body, { requireNote: false });
-    const leaveId = parseObjectIdString(id, "id");
-    const { hotelId } = actor;
-
-    const reviewerId = await resolveReviewerId(actor, this.deps.employees);
-    const existing = await this.loadReviewable(actor, leaveId);
-
-    // A leave that has already started cannot be approved. Its days are gone, so
-    // the only honest outcome is a rejection with a note.
-    if (existing.fromDate.getTime() < this.today().getTime()) {
-      throw LeaveErrors.startDatePassed();
-    }
-
-    // Recompute against the current schedule. Offs may have been added since the request was made.
-    const offs = await this.offKeysFor(hotelId, String(existing.userId), rangeOf(existing));
-    if (countLeaveDays(rangeOf(existing), offs) === 0) throw LeaveErrors.noWorkingDays();
-
-    const approved = await this.deps.requests.transitionFromStatus(
-      hotelId,
-      leaveId,
-      LeaveRequestStatus.PENDING,
-      {
-        status: LeaveRequestStatus.APPROVED,
-        reviewedBy: reviewerId,
-        reviewedAt: this.deps.clock(),
-        reviewNote: note,
-      },
-    );
-    if (!approved) throw LeaveErrors.concurrentUpdate();
-
-    // Conflict guard. Another manager may have approved an overlapping request at the same
-    // moment. If so, undo this approval so the employee never holds two approved overlapping leaves.
-    const conflicts = await this.deps.requests.findOverlapping({
-      hotelId,
-      userId: String(approved.userId),
-      from: approved.fromDate,
-      to: approved.toDate,
-      statuses: [LeaveRequestStatus.APPROVED],
-      excludeId: leaveId,
-    });
-    if (conflicts.length > 0) {
-      await this.deps.requests.revertApprovalToPending(hotelId, leaveId);
-      throw LeaveErrors.overlappingLeave();
-    }
-
-    // The employee is now away, so take them off the rosters for those days. If that
-    // fails, revert to PENDING so the approval is not recorded without its effect.
-    // Re-approving is safe, because removing an absent employee changes nothing.
-    try {
-      const removed = await this.deps.roster.removeEmployeeFromRange(
-        hotelId,
-        String(approved.userId),
-        approved.fromDate,
-        approved.toDate,
-      );
-      logger.info("Employee removed from rosters for approved leave", { hotelId, leaveId, rosters: removed });
-    } catch (error) {
-      await this.deps.requests.revertApprovalToPending(hotelId, leaveId);
-      throw error;
-    }
-
-    logger.info("Leave request approved", { hotelId, leaveId, reviewerId });
-    return this.toDetail(hotelId, approved, offs);
+    return this.recordReviewDecision(actor, id, LeaveReviewDecision.APPROVED, note);
   }
 
   async rejectRequest(actor: LeaveActor, id: string, body: unknown): Promise<LeaveRequestDto> {
     assertCanReviewLeave(actor);
     const { note } = parseReviewDecision(body, { requireNote: true });
+    return this.recordReviewDecision(actor, id, LeaveReviewDecision.REJECTED, note);
+  }
+
+  /**
+   * Records one role's vote. A manager decision is effective until HR votes;
+   * once HR has voted, its decision always controls the overall request status.
+   */
+  private async recordReviewDecision(
+    actor: LeaveActor,
+    id: string,
+    decision: LeaveReviewDecision,
+    note?: string,
+  ): Promise<LeaveRequestDto> {
     const leaveId = parseObjectIdString(id, "id");
     const { hotelId } = actor;
-
+    const reviewerRole = getLeaveReviewerRole(actor);
     const reviewerId = await resolveReviewerId(actor, this.deps.employees);
-    const existing = await this.loadReviewable(actor, leaveId);
+    const existing = await this.loadReviewable(actor, leaveId, reviewerRole);
 
-    const rejected = await this.deps.requests.transitionFromStatus(
+    const effectiveDecisionAfter =
+      reviewerRole === LeaveReviewerRole.HR
+        ? decision
+        : existing.hrReview?.decision ?? decision;
+    const isNewApproval =
+      effectiveDecisionAfter === LeaveReviewDecision.APPROVED &&
+      existing.status !== LeaveRequestStatus.APPROVED;
+
+    let approvalRosterIds: string[] | undefined;
+    if (isNewApproval) {
+      // No new approval can be granted after the leave has started.
+      if (existing.fromDate.getTime() < this.today().getTime()) {
+        throw LeaveErrors.startDatePassed();
+      }
+
+      // Offs may have changed after submission; only approve if at least one
+      // requested day is still a working day.
+      const offs = await this.offKeysFor(hotelId, String(existing.userId), rangeOf(existing));
+      if (countLeaveDays(rangeOf(existing), offs) === 0) throw LeaveErrors.noWorkingDays();
+
+      // Check before the update for a clear error, then check again after saving
+      // to guard against two overlapping approvals racing each other.
+      await this.assertNoApprovedOverlap(hotelId, leaveId, existing);
+      approvalRosterIds = await this.deps.roster.findEmployeeRosterIdsInRange(
+        hotelId,
+        String(existing.userId),
+        existing.fromDate,
+        existing.toDate,
+      );
+    }
+
+    const review: ILeaveReview = {
+      decision,
+      reviewedBy: reviewerId,
+      reviewedAt: this.deps.clock(),
+      note,
+    };
+    const saved = await this.deps.requests.saveReviewDecision(
       hotelId,
       leaveId,
-      LeaveRequestStatus.PENDING,
-      {
-        status: LeaveRequestStatus.REJECTED,
-        reviewedBy: reviewerId,
-        reviewedAt: this.deps.clock(),
-        reviewNote: note,
-      },
+      reviewerRole,
+      review,
+      approvalRosterIds,
+      reviewerRole === LeaveReviewerRole.HR ? this.legacyManagerReview(existing) : undefined,
     );
-    if (!rejected) throw LeaveErrors.concurrentUpdate();
+    if (!saved) return this.throwReviewUpdateError(actor, leaveId, reviewerRole);
 
-    const offs = await this.offKeysFor(hotelId, String(existing.userId), rangeOf(existing));
-    logger.info("Leave request rejected", { hotelId, leaveId, reviewerId });
-    return this.toDetail(hotelId, rejected, offs);
+    if (isNewApproval && saved.status === LeaveRequestStatus.APPROVED) {
+      try {
+        const latestBeforeRosterWrite = await this.deps.requests.findByIdInHotel(hotelId, leaveId);
+        if (latestBeforeRosterWrite?.status === LeaveRequestStatus.APPROVED) {
+          const conflicts = await this.deps.requests.findOverlapping({
+            hotelId,
+            userId: String(saved.userId),
+            from: saved.fromDate,
+            to: saved.toDate,
+            statuses: [LeaveRequestStatus.APPROVED],
+            excludeId: leaveId,
+          });
+          if (conflicts.length > 0) {
+            await this.deps.requests.undoReviewDecision(
+              hotelId,
+              leaveId,
+              reviewerRole,
+              decision,
+              existing,
+            );
+            throw LeaveErrors.overlappingLeave();
+          }
+
+          const removed = await this.deps.roster.removeEmployeeFromRosters(
+            hotelId,
+            String(saved.userId),
+            approvalRosterIds ?? [],
+          );
+          logger.info("Employee removed from rosters for approved leave", {
+            hotelId,
+            leaveId,
+            rosters: removed,
+          });
+
+          // If HR vetoed between recording the decision and applying the roster
+          // effect, compensate so the final rejected leave does not keep the
+          // employee off shifts. $addToSet makes this safe to retry.
+          const latest = await this.deps.requests.findByIdInHotel(hotelId, leaveId);
+          if (latest?.hrReview?.decision === LeaveReviewDecision.REJECTED) {
+            await this.deps.roster.restoreEmployeeToRosters(
+              hotelId,
+              String(saved.userId),
+              approvalRosterIds ?? [],
+              saved.fromDate,
+              saved.toDate,
+            );
+          }
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "LeaveError") throw error;
+        // Restore any assignments that a partially failed roster update may have
+        // removed, then undo the effective vote so retrying is safe.
+        try {
+          await this.deps.roster.restoreEmployeeToRosters(
+            hotelId,
+            String(saved.userId),
+            approvalRosterIds ?? [],
+            saved.fromDate,
+            saved.toDate,
+          );
+        } catch (restoreError) {
+          logger.error("Could not restore roster assignments after failed leave approval", {
+            hotelId,
+            leaveId,
+            error: restoreError,
+          });
+        }
+        await this.deps.requests.undoReviewDecision(
+          hotelId,
+          leaveId,
+          reviewerRole,
+          decision,
+          existing,
+        );
+        throw error;
+      }
+    }
+
+    if (
+      reviewerRole === LeaveReviewerRole.HR &&
+      decision === LeaveReviewDecision.REJECTED &&
+      existing.status === LeaveRequestStatus.APPROVED
+    ) {
+      const rosterIds = existing.approvalRosterIds ?? [];
+      try {
+        const restored = await this.deps.roster.restoreEmployeeToRosters(
+          hotelId,
+          String(existing.userId),
+          rosterIds,
+          existing.fromDate,
+          existing.toDate,
+        );
+        logger.info("Roster assignments restored after HR veto", {
+          hotelId,
+          leaveId,
+          rosters: restored,
+        });
+      } catch (error) {
+        // Keep the manager approval effective if its roster side effect could not
+        // be reversed; HR can retry after the roster store recovers.
+        await this.deps.requests.undoReviewDecision(
+          hotelId,
+          leaveId,
+          reviewerRole,
+          decision,
+          existing,
+        );
+        throw error;
+      }
+    }
+
+    const current = await this.deps.requests.findByIdInHotel(hotelId, leaveId);
+    if (!current) throw LeaveErrors.requestNotFound();
+    const offs = await this.offKeysFor(hotelId, String(current.userId), rangeOf(current));
+    logger.info("Leave review decision recorded", {
+      hotelId,
+      leaveId,
+      reviewerId,
+      reviewerRole,
+      decision,
+      status: current.status,
+    });
+    return this.toDetail(hotelId, current, offs);
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
@@ -298,18 +414,87 @@ export class LeaveRequestService {
     return todayInBusinessTimezone(this.deps.clock());
   }
 
-  /** Loads a request a manager may act on: it must exist in the hotel, be pending, and not be their own. */
-  private async loadReviewable(actor: LeaveActor, leaveId: string): Promise<ILeaveRequest> {
+  /** Loads a request this review lane may decide, and forbids self-review. */
+  private async loadReviewable(
+    actor: LeaveActor,
+    leaveId: string,
+    reviewerRole: LeaveReviewerRole,
+  ): Promise<ILeaveRequest> {
     const doc = await this.deps.requests.findByIdInHotel(actor.hotelId, leaveId);
     if (!doc) throw LeaveErrors.requestNotFound();
 
     if (actor.kind === "USER" && String(doc.userId) === actor.userId) {
       throw LeaveErrors.selfReviewForbidden();
     }
-    if (doc.status !== LeaveRequestStatus.PENDING) {
+    if (doc.status === LeaveRequestStatus.CANCELLED || this.hasReviewForRole(doc, reviewerRole)) {
       throw LeaveErrors.notPending(doc.status);
     }
     return doc;
+  }
+
+  private hasReviewForRole(doc: ILeaveRequest, role: LeaveReviewerRole): boolean {
+    if (role === LeaveReviewerRole.HR) return Boolean(doc.hrReview);
+    if (doc.managerReview) return true;
+    // Existing records predate the dual-review fields. Treat their single
+    // effective manager decision as already reviewed in the manager lane.
+    return Boolean(
+      !doc.hrReview &&
+      doc.reviewedBy &&
+      doc.reviewedByRole !== LeaveReviewerRole.HR,
+    );
+  }
+
+  /** Converts a pre-dual-review manager decision before HR replaces the flat fields. */
+  private legacyManagerReview(doc: ILeaveRequest): ILeaveReview | undefined {
+    if (doc.managerReview || doc.hrReview || !doc.reviewedBy || doc.reviewedByRole === LeaveReviewerRole.HR) {
+      return undefined;
+    }
+    const decision =
+      doc.status === LeaveRequestStatus.APPROVED
+        ? LeaveReviewDecision.APPROVED
+        : doc.status === LeaveRequestStatus.REJECTED
+          ? LeaveReviewDecision.REJECTED
+          : undefined;
+    if (!decision) return undefined;
+
+    return {
+      decision,
+      reviewedBy: doc.reviewedBy,
+      reviewedAt: doc.reviewedAt ?? doc.updatedAt ?? doc.createdAt,
+      note: doc.reviewNote ?? undefined,
+    };
+  }
+
+  private async throwReviewUpdateError(
+    actor: LeaveActor,
+    leaveId: string,
+    reviewerRole: LeaveReviewerRole,
+  ): Promise<never> {
+    const current = await this.deps.requests.findByIdInHotel(actor.hotelId, leaveId);
+    if (!current) throw LeaveErrors.requestNotFound();
+    if (actor.kind === "USER" && String(current.userId) === actor.userId) {
+      throw LeaveErrors.selfReviewForbidden();
+    }
+    if (current.status === LeaveRequestStatus.CANCELLED || this.hasReviewForRole(current, reviewerRole)) {
+      throw LeaveErrors.notPending(current.status);
+    }
+    throw LeaveErrors.concurrentUpdate();
+  }
+
+  private async assertNoApprovedOverlap(
+    hotelId: string,
+    leaveId: string,
+    request: ILeaveRequest,
+  ): Promise<void> {
+    const overlapping = await this.deps.requests.findOverlapping({
+      hotelId,
+      userId: String(request.userId),
+      from: request.fromDate,
+      to: request.toDate,
+      statuses: [LeaveRequestStatus.APPROVED],
+      excludeId: leaveId,
+    });
+    if (overlapping.length > 0) throw LeaveErrors.overlappingLeave();
   }
 
   private async assertNoLiveOverlap(

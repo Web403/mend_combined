@@ -10,6 +10,7 @@
 import {
   DayOffType,
   LeaveRequestStatus,
+  LeaveReviewerRole,
   LeaveType,
 } from "../../shared/enums/leave.enum";
 import {
@@ -64,6 +65,8 @@ export interface PageOptions {
 
 export interface LeaveRequestListFilters extends PageOptions {
   status?: LeaveRequestStatus;
+  /** Only requests not yet reviewed in this lane, regardless of the effective status. */
+  pendingFor?: LeaveReviewerRole;
   type?: LeaveType;
   userId?: string;
   /** Overlap filter: returns requests that touch any day in [from, to]. */
@@ -312,6 +315,11 @@ export function parseLeaveRequestListQuery(query: Record<string, unknown>): Leav
       queryString(query.status, "status"),
       "status",
       Object.values(LeaveRequestStatus),
+    ),
+    pendingFor: parseOptionalEnum(
+      queryString(query.pendingFor, "pendingFor"),
+      "pendingFor",
+      Object.values(LeaveReviewerRole),
     ),
     type: parseOptionalEnum(queryString(query.type, "type"), "type", Object.values(LeaveType)),
     userId: userId === undefined ? undefined : parseObjectIdString(userId, "userId"),
